@@ -1,0 +1,7 @@
+# os junk
+.DS_Store
+.Zone_Identifier
+
+#
+.venv/
+venv/
