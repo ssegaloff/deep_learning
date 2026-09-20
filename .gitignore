@@ -8,3 +8,6 @@ venv/
 
 # secrets
 .env
+
+# intermediate clipped gis files
+data-pipeline/intermediate
