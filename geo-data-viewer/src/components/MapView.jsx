@@ -1,5 +1,5 @@
 import { MapContainer, TileLayer, GeoJSON, Popup } from 'react-leaflet'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import 'leaflet/dist/leaflet.css'
 
 const ALBEMARLE_COUNTY_CENTER = [38.03, -78.48]
@@ -7,10 +7,20 @@ const ALBEMARLE_COUNTY_CENTER = [38.03, -78.48]
 const STATUS_OPTIONS = ['unchanged', 'modified', 'demolished']
 
 function MapView() {
-    console.log('MapView function body running')   // CHECK FOR REMOUNTING
-
     const [buildings, setBuildings] = useState(null)
     const [annotations, setAnnotations] = useState({})
+
+    // onEachFeature (below) only runs ONCE per feature, when Leaflet first builds
+    // that layer — not on every React re-render. That means any click handler set
+    // up inside it closes over whatever `annotations` was AT THAT MOMENT, forever,
+    // even after saveAnnotation updates the real state. A ref sidesteps this: the
+    // ref object itself never changes identity, so even a stale closure can still
+    // read its current .current value. We keep it in sync with `annotations` via
+    // the effect just below.
+    const annotationsRef = useRef(annotations)
+    useEffect(() => {
+        annotationsRef.current = annotations
+    }, [annotations])
 
     // tracks which single building's popup is currently open, or null if none
     const [selectedFeature, setSelectedFeature] = useState(null)
@@ -24,27 +34,26 @@ function MapView() {
     const [draftNote, setDraftNote] = useState('')
 
     function getAnnotation(footprintId) {
-        return annotations[footprintId]
+        // read through the ref, not the closed-over `annotations` variable, so this
+        // always sees the latest saved data even when called from onEachBuilding's
+        // frozen closure (see note on annotationsRef above)
+        return annotationsRef.current[footprintId]
     }
 
     function saveAnnotation(footprintId, { status, note }) {
-        setAnnotations(prevAnnotations => {
-            const updated = {
+        // functional updater form: always operates on React's true current state,
+        // never on a closed-over snapshot — same idea as annotationsRef, applied
+        // to the write side instead of the read side
+        setAnnotations(prevAnnotations => ({
             ...prevAnnotations,
             [footprintId]: { status, note },
-            }
-            console.log('saving annotation for', footprintId, updated)
-            return updated
-        })
+        }))
     }
 
     function onEachBuilding(feature, layer) {
         layer.on('click', (e) => {
             const footprintId = feature.properties.footprint_id
-            console.log('clicked footprintId:', footprintId, typeof footprintId)
-            console.log('current annotations object:', annotations)
             const existing = getAnnotation(footprintId)
-            console.log('existing annotation:', existing)
 
             // pre-fill the form: existing annotation's values if there is one, defaults otherwise
             setDraftStatus(existing ? existing.status : 'unchanged')
