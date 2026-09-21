@@ -1,14 +1,21 @@
-// This pulls in the two components we need from react-leaflet (both are named exports so we use {})
-import { MapContainer, TileLayer, GeoJSON } from 'react-leaflet'
+import { MapContainer, TileLayer, GeoJSON, Popup } from 'react-leaflet'
 import { useState, useEffect } from 'react'
 import 'leaflet/dist/leaflet.css'
 
 const ALBEMARLE_COUNTY_CENTER = [38.03, -78.48]
 
-function MapView() {
+const STATUS_OPTIONS = ['unchanged', 'modified', 'demolished']
 
+function MapView() {
     const [buildings, setBuildings] = useState(null)
     const [annotations, setAnnotations] = useState({})
+
+    // tracks which single building's popup is currently open, or null if none
+    const [selectedFeature, setSelectedFeature] = useState(null)
+
+    // in-progress form values for whichever popup is open right now
+    const [draftStatus, setDraftStatus] = useState('unchanged')
+    const [draftNote, setDraftNote] = useState('')
 
     function getAnnotation(footprintId) {
         return annotations[footprintId]
@@ -22,60 +29,78 @@ function MapView() {
     }
 
     function onEachBuilding(feature, layer) {
-        // pull out the two properties
-        const release = feature.properties.release
-        const captureDate = feature.properties.capture_dates_range
+        layer.on('click', () => {
+            const footprintId = feature.properties.footprint_id
+            const existing = getAnnotation(footprintId)
 
-        // handle the case when captureDate is blank/missing
-        const captureDateDisplay = captureDate ? captureDate : "No capture date recorded (earlier data release)"
+            // pre-fill the form: existing annotation's values if there is one, defaults otherwise
+            setDraftStatus(existing ? existing.status : 'unchanged')
+            setDraftNote(existing ? existing.note : '')
+            setSelectedFeature(feature)
+        })
+    }
 
-        // build the popup content as a plain HTML string
-        //    (this is NOT JSX — think template literal with <b>, <br>, etc.)
-        const popupContent = `
-            <b>Data Release:</b> ${release}<br>
-            <b>Capture Date:</b> ${captureDateDisplay}
-        `
-
-        // attach it to this specific layer
-        layer.bindPopup(popupContent)
+    function handleSubmit() {
+        saveAnnotation(selectedFeature.properties.footprint_id, {
+            status: draftStatus,
+            note: draftNote,
+        })
+        setSelectedFeature(null) // close the popup after saving
     }
 
     useEffect(() => {
-        // useEffect's own callback func can't be declared as async directly react expects
-        // it to return nothing or a clean-up func. an async func always returns a Promise
-        // instead. so we have to define a separate async func inside the effect
         async function loadBuildings() {
-            // fetch() starts an HTTP request and returns a Promise (a placeholder for the value that it eventually returns)
-            // await pauses the execution of the function until the Promise resolves and returns the
-            // resolved value, which is here a Response object
             const response = await fetch('/albemarle-buildings.geojson')
-            // response is metadata about the HTTP request, not the json data itself
-            // .json() reads and parses the HTTP response body which is itself asynchronous
-            // so it needs its own await
             const data = await response.json()
-            // now we have the parsed geojson object. calling setBuildings() will update the buildings state
-            // and tell react to re-render the component with the new data
             setBuildings(data)
         }
-        // we call loadBuildings() with no await because we are no longer inside an async func
-        // we are in useEffect()'s callback. await is only legal syntax inside a function marked async
-        // we don't need to wait for it to finish here anyway, we just want to start it and let
-        // setBuildings() (called later once data arrives) to handle the rest of the updating of UI when its ready
         loadBuildings()
     }, [])
-    // the empty array here is the "dependencies array". it tells react this effect should run exactly once
-    // right after the component's first render, and never again. without it, the effect would re-run every time
-    // the component re-renders which would mean re-fetching in an infinite loop
 
     return (
-    <MapContainer center={ALBEMARLE_COUNTY_CENTER} zoom={15} style = {{ height: '500px', width: '100%' }} preferCanvas >
-        {/* TileLayer pulls actual map images from OpenStreetMap's tile servers */}
-        <TileLayer 
-        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-        attribution="Tiles &copy; Esri"/>
-        {buildings && <GeoJSON data={buildings} onEachFeature={onEachBuilding} />}
-    </MapContainer>
-  )
+        <MapContainer center={ALBEMARLE_COUNTY_CENTER} zoom={15} style={{ height: '500px', width: '100%' }} preferCanvas>
+            <TileLayer
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                attribution="Tiles &copy; Esri"
+            />
+            {buildings && <GeoJSON data={buildings} onEachFeature={onEachBuilding} />}
+
+            {selectedFeature && (
+                <Popup
+                    position={[
+                        ALBEMARLE_COUNTY_CENTER[0], // placeholder — see note below
+                        ALBEMARLE_COUNTY_CENTER[1],
+                    ]}
+                    eventHandlers={{ remove: () => setSelectedFeature(null) }}
+                >
+                    <div>
+                        <b>Data Release:</b> {selectedFeature.properties.release}<br />
+                        <b>Capture Date:</b> {selectedFeature.properties.capture_dates_range || 'No capture date recorded'}<br />
+                        <hr />
+                        <label>
+                            Status:
+                            <select value={draftStatus} onChange={(e) => setDraftStatus(e.target.value)}>
+                                {STATUS_OPTIONS.map((option) => (
+                                    <option key={option} value={option}>{option}</option>
+                                ))}
+                            </select>
+                        </label>
+                        <br />
+                        <label>
+                            Note:
+                            <input
+                                type="text"
+                                value={draftNote}
+                                onChange={(e) => setDraftNote(e.target.value)}
+                            />
+                        </label>
+                        <br />
+                        <button onClick={handleSubmit}>Save</button>
+                    </div>
+                </Popup>
+            )}
+        </MapContainer>
+    )
 }
 
 export default MapView
