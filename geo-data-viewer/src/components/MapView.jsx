@@ -13,6 +13,10 @@ function MapView() {
     // tracks which single building's popup is currently open, or null if none
     const [selectedFeature, setSelectedFeature] = useState(null)
 
+    // where the click actually happened, so the popup opens at the right spot
+    // regardless of how the map has been panned/zoomed
+    const [clickPosition, setClickPosition] = useState(null)
+
     // in-progress form values for whichever popup is open right now
     const [draftStatus, setDraftStatus] = useState('unchanged')
     const [draftNote, setDraftNote] = useState('')
@@ -29,7 +33,7 @@ function MapView() {
     }
 
     function onEachBuilding(feature, layer) {
-        layer.on('click', () => {
+        layer.on('click', (e) => {
             const footprintId = feature.properties.footprint_id
             const existing = getAnnotation(footprintId)
 
@@ -37,6 +41,7 @@ function MapView() {
             setDraftStatus(existing ? existing.status : 'unchanged')
             setDraftNote(existing ? existing.note : '')
             setSelectedFeature(feature)
+            setClickPosition(e.latlng) // where the click happened, in map coordinates
         })
     }
 
@@ -65,12 +70,9 @@ function MapView() {
             />
             {buildings && <GeoJSON data={buildings} onEachFeature={onEachBuilding} />}
 
-            {selectedFeature && (
+            {selectedFeature && clickPosition && (
                 <Popup
-                    position={[
-                        ALBEMARLE_COUNTY_CENTER[0], // placeholder — see note below
-                        ALBEMARLE_COUNTY_CENTER[1],
-                    ]}
+                    position={clickPosition}
                     eventHandlers={{ remove: () => setSelectedFeature(null) }}
                 >
                     <div>
