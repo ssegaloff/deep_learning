@@ -5,28 +5,40 @@ import 'leaflet/dist/leaflet.css'
 
 const ALBEMARLE_COUNTY_CENTER = [38.03, -78.48]
 
-function onEachBuilding(feature, layer) {
-    // pull out the two properties
-    const release = feature.properties.release
-    const captureDate = feature.properties.capture_dates_range
-
-    // handle the case when captureDate is blank/missing
-    const captureDateDisplay = captureDate ? captureDate : "No capture date recorded (earlier data release)"
-    
-    // build the popup content as a plain HTML string
-    //    (this is NOT JSX — think template literal with <b>, <br>, etc.)
-    const popupContent = `
-        <b>Data Release:</b> ${release}<br>
-        <b>Capture Date:</b> ${captureDateDisplay}
-    `
-
-    // attach it to this specific layer
-    layer.bindPopup(popupContent)
-}
-
 function MapView() {
-  
+
     const [buildings, setBuildings] = useState(null)
+    const [annotations, setAnnotations] = useState({})
+
+    function getAnnotation(footprintId) {
+        return annotations[footprintId]
+    }
+
+    function saveAnnotation(footprintId, { status, note }) {
+        setAnnotations({
+            ...annotations,
+            [footprintId]: { status, note },
+        })
+    }
+
+    function onEachBuilding(feature, layer) {
+        // pull out the two properties
+        const release = feature.properties.release
+        const captureDate = feature.properties.capture_dates_range
+
+        // handle the case when captureDate is blank/missing
+        const captureDateDisplay = captureDate ? captureDate : "No capture date recorded (earlier data release)"
+
+        // build the popup content as a plain HTML string
+        //    (this is NOT JSX — think template literal with <b>, <br>, etc.)
+        const popupContent = `
+            <b>Data Release:</b> ${release}<br>
+            <b>Capture Date:</b> ${captureDateDisplay}
+        `
+
+        // attach it to this specific layer
+        layer.bindPopup(popupContent)
+    }
 
     useEffect(() => {
         // useEffect's own callback func can't be declared as async directly react expects
