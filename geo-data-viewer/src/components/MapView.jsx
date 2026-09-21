@@ -7,6 +7,8 @@ const ALBEMARLE_COUNTY_CENTER = [38.03, -78.48]
 const STATUS_OPTIONS = ['unchanged', 'modified', 'demolished']
 
 function MapView() {
+    console.log('MapView function body running')   // CHECK FOR REMOUNTING
+
     const [buildings, setBuildings] = useState(null)
     const [annotations, setAnnotations] = useState({})
 
@@ -26,16 +28,23 @@ function MapView() {
     }
 
     function saveAnnotation(footprintId, { status, note }) {
-        setAnnotations({
-            ...annotations,
+        setAnnotations(prevAnnotations => {
+            const updated = {
+            ...prevAnnotations,
             [footprintId]: { status, note },
+            }
+            console.log('saving annotation for', footprintId, updated)
+            return updated
         })
     }
 
     function onEachBuilding(feature, layer) {
         layer.on('click', (e) => {
             const footprintId = feature.properties.footprint_id
+            console.log('clicked footprintId:', footprintId, typeof footprintId)
+            console.log('current annotations object:', annotations)
             const existing = getAnnotation(footprintId)
+            console.log('existing annotation:', existing)
 
             // pre-fill the form: existing annotation's values if there is one, defaults otherwise
             setDraftStatus(existing ? existing.status : 'unchanged')
