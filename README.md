@@ -1,86 +1,55 @@
 # Albemarle County Building Footprint Viewer
 
-DS7400 (Deep Learning, Prof. Baek) — HW1: Build the Foundation for Your Deep Learning Application
+(Please note this README.md was written with Claude.)
 
 ## Description
-
-<!-- TODO: 2-3 sentences on what this app does, once the viewer is fully locked -->
-An interactive web-based viewer for building footprint polygons over satellite imagery, focused on Albemarle County, VA. Built as the foundation for a semester-long deep learning application; future homeworks will add DL capability on top of this viewer (e.g. classification, detection, change detection).
+A web-based viewer for exploring building footprint data over Albemarle County, VA. Users can click any building on the map to review it against current satellite imagery and record whether it matches, has changed, or is no longer present — laying the groundwork for later assignments that will use deep learning to detect these kinds of changes automatically from imagery.
 
 ## Data
+- **Type:** Geospatial vector data (building footprint polygons, GeoJSON)
+- **Source:** Microsoft US Building Footprints (ODbL license), clipped to Albemarle County, VA via a `ogr2ogr`-based pipeline (see `data-pipeline/`)
+- Each footprint is assigned a stable `footprint_id` at pipeline time, since the source data has no persistent unique ID of its own
 
-- **Source:** [Microsoft US Building Footprints](https://github.com/microsoft/USBuildingFootprints) (ODbL license), Virginia state file.
-- **Processing:** Clipped to an Albemarle County bounding box (sourced from Nominatim) using `ogr2ogr`, then each feature is assigned a `footprint_id` and written to `geo-data-viewer/public/albemarle-buildings.geojson`.
-- **CRS:** EPSG:4326 (WGS84).
-- **Feature count:** ~77,897 building footprints after clipping.
-- **Note on `footprint_id`:** assigned as a sequential index on each pipeline run — not guaranteed stable across reruns if the source data changes. Flagging in case later homeworks build annotations keyed on this id.
+## Features Implemented
+- Interactive Leaflet map of Albemarle County with satellite imagery basemap
+- Building footprints rendered as clickable GeoJSON polygons
+- Clicking a building opens a popup showing its data-release/capture-date metadata
+- **Annotation:** the popup lets the user label a footprint's current status (`unchanged` / `modified` / `demolished`) and add a free-text note
+- **Backend:** annotations are persisted to a SQLite database via a FastAPI backend, so labels survive a page refresh
 
-The raw Virginia source file (~800MB) is **not committed to this repo** — it's large and not something that belongs in version control. See [Running the data pipeline](#running-the-data-pipeline) below to regenerate it locally.
+## Annotation: Yes
+Implemented as a label/flag workflow — clicking a building opens a form to set a status and note, which is saved via the backend (see below).
 
-### Known limitation: footprint/imagery date mismatch
+## Backend/Database: Yes
+- **Stack:** FastAPI + SQLite
+- **Scope:** minimal scaffold, storing annotations only (footprint geometry itself is still served statically from the frontend's bundled GeoJSON)
+- **Endpoints:**
+  - `GET /annotations` — returns all saved annotations
+  - `POST /annotations` — upserts one annotation, keyed by `footprint_id`
 
-The building footprint polygons and the satellite basemap were **not captured at the same time**, and the imagery is the newer of the two:
-
-- **Footprints:** per [Microsoft's own documentation](https://github.com/Microsoft/USBuildingFootprints/blob/master/README.md), most US footprints are from 2019–2020 imagery, with the remainder averaging ~2012. Our Albemarle features carry `release`/`capture_dates_range` properties consistent with this — the newer batch (`release: 2`) is dated `7/1/2018–8/1/2018`; the older batch (`release: 1`) has no recorded date.
-- **Imagery:** the Esri World Imagery basemap is a live, continuously-updated composite, not a fixed vintage. We verified the actual source imagery for a sampled Albemarle coordinate via Esri's `identify` REST endpoint (`server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/identify`); the highest-draw-order (i.e. actually-rendered) source layer at that point was `Virginia2025`, dated **Feb–Mar 2025**.
-
-**Net effect:** at the sampled location, satellite imagery is roughly **6–7 years newer** than the footprint polygon it's paired with. This is not necessarily uniform across the whole county (imagery vintage is composited from different source blocks region to region), but the imagery-newer-than-footprint direction is the one to assume. This is exactly what the annotation feature (below) is designed to let a user flag: a footprint that no longer matches what the current imagery shows.
+## Libraries / Frameworks
+- **Frontend:** React (Vite), react-leaflet, Leaflet
+- **Backend:** FastAPI, SQLite (via Python's built-in `sqlite3`), Pydantic, Uvicorn
+- **Data pipeline:** GDAL / `ogr2ogr`
 
 ## Running the Application
 
-<!-- TODO: fill in once viewer is finalized -->
+### 1. Frontend
 ```bash
 cd geo-data-viewer
 npm install
 npm run dev
 ```
-Then open `http://localhost:5173` (or whatever port Vite reports).
+Opens at `http://localhost:5173`.
 
-## Running the Data Pipeline
-
-Only needed if you want to regenerate `albemarle-buildings.geojson` from source (it's already committed in `geo-data-viewer/public/`, so this is optional for just running the viewer).
-
-**System dependency:** GDAL (provides `ogr2ogr`).
+### 2. Backend
+From the repo root, in a separate terminal:
 ```bash
-brew install gdal      # macOS, via Homebrew
-ogr2ogr --version      # verify install
+source venv/bin/activate
+uv pip install -r backend/requirements.txt
+cd backend
+uvicorn main:app --reload --port 8000
 ```
+Runs at `http://localhost:8000`. The frontend must be running at `http://localhost:5173` for CORS to allow requests between the two (configured in `backend/main.py`).
 
-**Python dependencies:** managed via `uv`.
-```bash
-uv sync
-```
-
-**Data:** download the Virginia GeoJSON from [Microsoft US Building Footprints](https://github.com/microsoft/USBuildingFootprints) and place it at `~/gis-scratch/Virginia.geojson`.
-
-**Run:**
-<!-- TODO: confirm exact invocation / working directory -->
-```bash
-uv run python data-pipeline/build_buildings_data.py
-```
-This regenerates `geo-data-viewer/public/albemarle-buildings.geojson`. The script is idempotent — safe to rerun any number of times.
-
-## Major Libraries / Frameworks
-
-<!-- TODO: confirm full list once viewer is finalized -->
-- **Frontend:** React (Vite), react-leaflet (map rendering), Esri World Imagery (satellite basemap tiles)
-- **Data pipeline:** GDAL/`ogr2ogr` (clipping), `geopandas` (id assignment, GeoJSON I/O)
-
-## Features Implemented
-
-<!-- TODO: finalize this list against actual submitted state -->
-- Satellite imagery basemap (Esri World Imagery)
-- Building footprint polygons rendered as an interactive layer (Leaflet `GeoJSON`, canvas renderer for performance at ~78k features)
-- Click-to-popup on individual buildings, showing footprint metadata (`release`, `capture_dates_range`)
-- [ ] Zoom / pan — confirm status
-- [ ] Filename/metadata display — confirm what's shown beyond popup
-
-## Annotation
-
-<!-- TODO -->
-Not yet implemented. <!-- update if pursued for +10 -->
-
-## Backend / Database
-
-<!-- TODO -->
-Not yet implemented. <!-- update if pursued for +10 -->
+Both servers need to be running simultaneously for annotations to load and save.
