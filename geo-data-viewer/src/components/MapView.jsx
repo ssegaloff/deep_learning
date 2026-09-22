@@ -2,7 +2,8 @@ import { MapContainer, TileLayer, GeoJSON, Popup } from 'react-leaflet'
 import { useState, useEffect, useRef } from 'react'
 import 'leaflet/dist/leaflet.css'
 
-const ALBEMARLE_COUNTY_CENTER = [38.03, -78.48]
+// const ALBEMARLE_COUNTY_CENTER = [38.03, -78.48]
+const SCHOOL_OF_DATA_SCIENCE = [38.04071, -78.50767]
 
 const STATUS_OPTIONS = ['unchanged', 'modified', 'demolished']
 
@@ -104,7 +105,7 @@ function MapView() {
     }, [])
 
     return (
-        <MapContainer center={ALBEMARLE_COUNTY_CENTER} zoom={15} style={{ height: '500px', width: '100%' }} preferCanvas>
+        <MapContainer center={SCHOOL_OF_DATA_SCIENCE} zoom={18} style={{ height: '500px', width: '100%' }} preferCanvas>
             <TileLayer
                 url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
                 attribution="Tiles &copy; Esri"
