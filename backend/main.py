@@ -64,7 +64,7 @@ def get_conn():
 
 
 class Annotation(BaseModel):
-    footprint_id: str
+    footprint_id: str | int
     status: str = "unchanged"  # unchanged | modified | demolished | new
     note: str | None = None
     source: str = "microsoft"  # microsoft | user_drawn

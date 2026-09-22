@@ -11,3 +11,7 @@ venv/
 
 # intermediate clipped gis files
 data-pipeline/intermediate
+
+# sqlite db
+backend/annotations.db
+backend/__pycache__/
