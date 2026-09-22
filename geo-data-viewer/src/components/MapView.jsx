@@ -8,7 +8,8 @@ const STATUS_OPTIONS = ['unchanged', 'modified', 'demolished']
 
 function MapView() {
     const [buildings, setBuildings] = useState(null)
-    const [annotations, setAnnotations] = useState({})
+    const [annotations, setAnnotations] = useState({}) // keyed by footprint_id
+
 
     // onEachFeature (below) only runs ONCE per feature, when Leaflet first builds
     // that layer — not on every React re-render. That means any click handler set
@@ -40,10 +41,17 @@ function MapView() {
         return annotationsRef.current[footprintId]
     }
 
-    function saveAnnotation(footprintId, { status, note }) {
-        // functional updater form: always operates on React's true current state,
-        // never on a closed-over snapshot — same idea as annotationsRef, applied
-        // to the write side instead of the read side
+    async function saveAnnotation(footprintId, { status, note }) {
+        await fetch('http://localhost:8000/annotations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                footprint_id: footprintId,
+                status,
+                note,
+                source: 'microsoft',
+            }),
+        })
         setAnnotations(prevAnnotations => ({
             ...prevAnnotations,
             [footprintId]: { status, note },
@@ -63,12 +71,17 @@ function MapView() {
         })
     }
 
-    function handleSubmit() {
-        saveAnnotation(selectedFeature.properties.footprint_id, {
-            status: draftStatus,
-            note: draftNote,
-        })
-        setSelectedFeature(null) // close the popup after saving
+    async function handleSubmit() {
+        try {
+            await saveAnnotation(selectedFeature.properties.footprint_id, {
+                status: draftStatus,
+                note: draftNote,
+            })
+            setSelectedFeature(null) // only close once the save actually succeeded
+        } catch (err) {
+            console.error('Failed to save annotation:', err)
+            // popup stays open so you can see something's wrong and retry
+        }
     }
 
     useEffect(() => {
@@ -78,6 +91,16 @@ function MapView() {
             setBuildings(data)
         }
         loadBuildings()
+    }, [])
+
+    useEffect(() => {
+        async function loadAnnotations() {
+            const response = await fetch('http://localhost:8000/annotations')
+            const rows = await response.json()
+            const byId = Object.fromEntries(rows.map(r => [r.footprint_id, r]))
+            setAnnotations(byId)
+        }
+        loadAnnotations()
     }, [])
 
     return (
