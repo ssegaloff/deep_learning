@@ -7,7 +7,7 @@ import argparse
 import csv
 import json
 import os
-import random
+from sklearn.model_selection import train_test_split
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -42,11 +42,14 @@ def build_manifest(
     """Pure: no file writes. Returns (rows, meta).
 
     TODO:
+    - files = discover_files(data_root)              (already sorted)
     - classes = sorted class names; label = index into that list
-    - for each class: take its source_split == "train" files,
-      shuffle with a LOCAL random.Random(seed), move val_fraction of them to split "val"
-    - source_split == "test" files get split "test", untouched
-    - check: ids are unique (raise ValueError listing duplicates)
+    - pool = only the source_split == "train" files   (ModelNet test never enters the split)
+    - train_part, val_part = train_test_split(
+          pool, test_size=val_fraction, stratify=<labels of pool>, random_state=seed)
+    - rows: train_part -> "train", val_part -> "val", source test files -> "test"
+    - check: ids unique (raise ValueError listing duplicates)
+    - sort the final rows (class, then id) so the CSV is identical run to run
     - meta = {"classes": [...], "val_fraction": ..., "seed": ...}
     """
     ...
