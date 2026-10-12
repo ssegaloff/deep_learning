@@ -19,3 +19,8 @@ backend/__pycache__/
 # recordings
 *.mp4
 recordings/
+
+# meshes
+*.ply
+*.obj
+data/raw
