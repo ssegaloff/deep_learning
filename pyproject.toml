@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.143.0",
     "numpy>=2.5.4",
     "pathlib>=1.0.1",
+    "scikit-learn>=1.9.1",
     "torch>=2.14.1",
     "trimesh>=5.1.1",
     "uvicorn[standard]>=0.54.0",
