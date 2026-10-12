@@ -15,6 +15,7 @@ data-pipeline/intermediate
 # sqlite db
 backend/annotations.db
 backend/__pycache__/
+__pycache__/
 
 # recordings
 *.mp4
@@ -24,3 +25,10 @@ recordings/
 *.ply
 *.obj
 data/raw
+
+# ModelNet
+*.off
+
+*.npz
+*.zip
+
