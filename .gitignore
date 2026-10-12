@@ -9,9 +9,6 @@ venv/
 # secrets
 .env
 
-# sqlite db
-__pycache__/
-
 # recordings
 *.mp4
 recordings/
@@ -27,3 +24,4 @@ data/raw
 *.npz
 *.zip
 
+__pycache__/
