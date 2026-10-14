@@ -1,0 +1,16 @@
+{
+  "classes": [
+    "bathtub",
+    "bed",
+    "chair",
+    "desk",
+    "dresser",
+    "monitor",
+    "night_stand",
+    "sofa",
+    "table",
+    "toilet"
+  ],
+  "val_fraction": 0.15,
+  "seed": 0
+}
