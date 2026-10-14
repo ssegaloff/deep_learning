@@ -30,14 +30,7 @@ class ManifestRow:
 
 
 def discover_files(data_root: Path) -> list[tuple[str, str, str]]:
-    """Return sorted (class_name, source_split, relpath) for every .off file under data_root.
-
-    TODO:
-    - data_root.glob("*/*/*.off"); class and split from p.relative_to(data_root).parts
-    - raise ValueError if a split folder isn't in SOURCE_SPLITS (don't silently include it)
-    - relpath = p.relative_to(data_root).as_posix()
-    - return sorted(...)  (tuple order = class, split, relpath)
-    """
+    """Return sorted (class_name, source_split, relpath) for every .off file under data_root."""
     results = []
     for path in data_root.glob("*/*/*.off"):
         rel = path.relative_to(data_root) # get relative paths
@@ -102,7 +95,7 @@ def write_manifest(rows: list[ManifestRow], meta: dict, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with open(out_dir / MANIFEST_NAME, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=[fld.name for fld in fields(ManifestRow)])
+        writer = csv.DictWriter(f, fieldnames=[fld.name for fld in fields(ManifestRow)], lineterminator="\n")
         writer.writeheader()
         writer.writerows(asdict(r) for r in rows)
 
