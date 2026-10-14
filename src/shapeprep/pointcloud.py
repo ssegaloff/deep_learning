@@ -1,4 +1,4 @@
-"""mesh loading, normalization, and surface sampling shared by training and the backend."""
+"""mesh loading, normalization, surface sampling, and voxelization shared by training and the backend."""
 from pathlib import Path
 
 import numpy as np
@@ -47,3 +47,17 @@ def sample_points(mesh: trimesh.Trimesh, n: int, rng: np.random.Generator) -> np
     v = np.where(flip, 1 - v, v)
     # compute in float64 for accuracy, store float32 because that's torch's default and halves the file size
     return (a + u * (b - a) + v * (c - a)).astype(np.float32)
+
+
+def voxelize(points: np.ndarray, grid: int = 16) -> np.ndarray:
+    # a point outside the unit sphere means normalize was skipped; fail loudly instead of clipping it into a border cell
+    # the 1e-5 slack absorbs float32 rounding of points that sit exactly on the sphere
+    if np.abs(points).max() > 1 + 1e-5:
+        raise ValueError("points must be normalized to [-1, 1] before voxelizing")
+    # map [-1, 1] onto cell indices 0..grid-1; clip because a coordinate of exactly 1.0 would land in cell `grid`
+    idx = np.clip(((points + 1) / 2 * grid).astype(np.int64), 0, grid - 1)
+    occ = np.zeros((grid, grid, grid), dtype=np.float32)
+    # binary occupancy: a cell is 1 if any point hits it, so the feature doesn't depend on how many points were sampled
+    occ[idx[:, 0], idx[:, 1], idx[:, 2]] = 1.0
+    # flatten for logistic regression and the MLP; the 3D layout only matters to a convolutional model
+    return occ.ravel()

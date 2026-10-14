@@ -1,0 +1,28 @@
+{
+  "features": {
+    "type": "binary voxel occupancy",
+    "grid": 16,
+    "n_points": 1024
+  },
+  "majority": {
+    "val": {
+      "accuracy": 0.22203672787979967,
+      "macro_f1": 0.03633879781420765
+    },
+    "test": {
+      "accuracy": 0.11013215859030837,
+      "macro_f1": 0.01984126984126984
+    }
+  },
+  "logistic_regression": {
+    "C": 1.0,
+    "val": {
+      "accuracy": 0.9098497495826378,
+      "macro_f1": 0.8577774753908949
+    },
+    "test": {
+      "accuracy": 0.8700440528634361,
+      "macro_f1": 0.8659318242252285
+    }
+  }
+}
