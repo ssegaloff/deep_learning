@@ -60,10 +60,31 @@ The files are not committed; rebuild them with the steps below.
 - **Why 2,048 points when the model uses fewer:** training draws a fresh random subset of each object's points every epoch, as augmentation. Validation, test, and the backend use a fixed subset. Meshes are loaded only once.
 - **Reproducibility:** one random generator, consumed in manifest order, so a single seed reproduces every file.
 
-### 4. Baselines: TODO
+### 4. Features and baselines: `training/baselines.py`
 
-- Majority class: always predicts "chair". Expected test accuracy 100/908 ≈ 11.0% and macro-F1 ≈ 0.02 (arithmetic, not yet run).
-- Logistic regression: the "shallow benchmark." Feature choice TODO.
+**Features: binary voxel occupancy** (`voxelize` in `src/shapeprep/pointcloud.py`).
+- Take the first 1,024 stored points of each object.
+- Divide the cube [−1, 1]³ into a 16×16×16 grid.
+- Mark each cell 1 if any point falls in it, giving 4,096 features.
+
+**Why voxels instead of raw coordinates:**
+- A point cloud has no meaningful order. In a flattened coordinate vector, "position 17" is a different random point every time, so a linear model can't learn shape from it.
+- A voxel grid gives the same result whatever order the points are in. It also uses ModelNet10's consistent object orientation.
+
+**Same features for the baseline and the neural network.** Both models see identical inputs, so the comparison isolates one change: the hidden layer.
+
+**Results:** numbers come from `results/baselines.json`, which the script writes.
+
+| Model | Val accuracy | Val macro-F1 | Test accuracy | Test macro-F1 |
+|---|---|---|---|---|
+| Majority class (always "chair") | 0.222 | 0.036 | 0.110 | 0.020 |
+| Logistic regression (L2, C = 1.0) | 0.910 | 0.858 | **0.870** | **0.866** |
+
+- **Choosing C:** the regularization strength C was chosen on validation macro-F1 from {0.01, 0.1, 1, 10, 100}. The test set was not used for any choice.
+  - The chosen model's validation score is slightly optimistic, since it's the best of five. The test score is unbiased.
+- **Majority class:** accuracy is 11% on the near-balanced test set but 22% on validation, which keeps the training set's imbalance. Its macro-F1 is close to 0 on both, because it never predicts nine of the ten classes.
+- **Logistic regression:** accuracy drops from validation to test, but macro-F1 doesn't (0.858 → 0.866). This points to the different class mix, not overfitting: validation accuracy is dominated by large classes such as chair, while test weights the classes almost equally.
+- **What the neural network has to beat:** a test error below 13.0%. With 908 test objects, the standard error of an accuracy near 0.87 is about 0.011. So a gain of about one point would be within noise.
 
 ### 5. Model and training: TODO
 
@@ -82,7 +103,8 @@ Training/validation loss vs. epoch, training accuracy, test accuracy and macro-F
 - [x] Dataset manifest with stratified train/val split
 - [x] Mesh normalization and area-weighted surface sampling
 - [x] Preprocessed point-cloud dataset
-- [ ] Baselines
+- [x] Voxel occupancy features
+- [x] Baselines (majority class, logistic regression)
 - [ ] Neural network and training
 - [ ] 3D viewer
 - [ ] Classify button with class probabilities
@@ -115,6 +137,14 @@ uv run python training/build_dataset.py
 ```
 
 The first command is only needed if `data/manifest.csv` is missing; the committed one is the canonical split. The second command takes about a minute.
+
+### Baselines
+
+```bash
+uv run python training/baselines.py
+```
+
+This writes `results/baselines.json`. Every step is deterministic, so a rerun reproduces the same numbers.
 
 ### Train, backend, frontend: TODO
 
