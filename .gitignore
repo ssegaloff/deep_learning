@@ -24,4 +24,7 @@ data/raw
 *.npz
 *.zip
 
-__pycache__/
+__pycache__
+
+/documents/hw2-video-outline.md
+
