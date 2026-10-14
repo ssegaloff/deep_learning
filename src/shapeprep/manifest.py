@@ -38,7 +38,14 @@ def discover_files(data_root: Path) -> list[tuple[str, str, str]]:
     - relpath = p.relative_to(data_root).as_posix()
     - return sorted(...)  (tuple order = class, split, relpath)
     """
-    ...
+    results = []
+    for path in data_root.glob("*/*/*.off"):
+        rel = path.relative_to(data_root) # get relative paths
+        class_name, source_split, _ = rel.parts # splits the paths into its components (class, split, filename)
+        if source_split not in SOURCE_SPLITS:
+            raise ValueError(f"Unexpected split folder {source_split!r}: {rel.as_posix()}")
+        results.append((class_name, source_split, rel.as_posix())) # rel.as_posix gives forward slashes on every OS (so a manifest written on windows and one on linux would be byte identical)
+    return sorted(results) # since tuples compare element by element, this sorts by class, then split, then relpath
 
 
 def build_manifest(
