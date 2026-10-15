@@ -6,7 +6,7 @@
 
 ## Description
 
-A web application that shows 3D CAD models of household objects and classifies them with two small neural networks. The user picks an object, sees the 3D mesh, and clicks **Classify** to see both models' predicted class and their probability for every class, side by side, next to the true class. A filter lists only the objects one or both models get wrong.
+A web application that shows 3D CAD models of household objects and classifies them with two small neural networks. The user picks an object, sees the 3D mesh with its basic metadata, and clicks **Classify** to see both models' predicted class and their probability for every class, side by side, next to the true class. A filter lists only the objects one or both models get wrong, and a review form records a person's judgment of each object's label in a SQLite database.
 
 This is the first step toward a longer project on 3D shape completion. Classification comes first because it builds the full pipeline: mesh loading, preprocessing, training, a backend that serves meshes and predictions, and a 3D viewer.
 
@@ -133,18 +133,31 @@ React (Vite) → /api/* → Vite dev proxy → FastAPI → PyTorch (both models,
 | Route | Returns |
 |---|---|
 | `GET /objects` | Every object's id, class, and split |
+| `GET /objects/{id}` | One object's metadata: split, ModelNet source split, file path, vertex and face counts |
 | `GET /objects/{id}/mesh` | The normalized mesh as binary PLY |
 | `POST /predict` with `{"id": ...}` | True class, plus each model's predicted class and probability for every class |
 | `GET /predictions?split=...&class_name=...` | Each listed object's predicted class from each model (for the filter) |
+| `POST /objects/{id}/reviews` | Saves a label review and returns the stored row |
+| `GET /objects/{id}/reviews` | That object's review history, newest first |
+| `GET /reviews` | The latest review of every reviewed object |
 
 - Predictions use the same stored 1,024 points that training used, not a fresh sample from the mesh, so a borderline object can't flip between runs. Running all 908 test objects through `/predict` reproduces the saved test accuracies exactly (0.870 and 0.903).
 - Both prediction routes call one forward function, so the filter's labels and the Classify panel can't disagree.
 - Inference runs on the CPU (a few milliseconds per object for both models), which keeps the GPU free for training.
 
+**Label reviews (SQLite).** Reviews are stored in `backend/reviews.db`, created on first start.
+- Each review records a verdict on the object's label (ok, wrong, or ambiguous), the class it should be when wrong, a separate mesh-problem flag (a label can be right while the mesh is broken), an optional note, and whether the model's prediction was on screen when the verdict was given. A verdict given after seeing "desk 91%" isn't independent of the model, so the record says which kind it is.
+- **Append-only:** a correction is a new row, and the history keeps every earlier verdict. There's no delete route.
+- **Reviews never change the dataset:** the manifest and training labels are untouched. A review is a record of judgment, not a correction.
+- The rules are enforced twice: by the API (a readable 422, e.g. "wrong" without a class) and by the table's own CHECK constraints. Startup refuses a database file written for a different schema version.
+- The database file is gitignored (it's user-generated state), so this repo ships no reviews; the demo video shows them.
+
 **Frontend (React 19 + React Three Fiber).** Three panels:
 - **Object picker:** class, split (test by default, since the models never trained on those objects), and a **Show** filter: all objects, any model wrong, PointNet wrong, or Voxel MLP wrong.
-- **3D viewer:** the selected mesh, with rotate, zoom, and pan. The meshes arrive normalized to the unit sphere, so one fixed camera fits every object; ModelNet's Z-up is rotated to three.js's Y-up for display only.
-- **Classify panel:** a table with one row per class and one column per model: a bar and percentage per cell, the true class's row marked, and ✓/✗ with the predicted class for each model.
+- **3D viewer:** the selected mesh, with rotate, zoom, and pan, under an info strip (id, class, split, file, vertex and face counts). The meshes arrive normalized to the unit sphere, so one fixed camera fits every object; ModelNet's Z-up is rotated to three.js's Y-up for display only.
+- **Right panel:** an About section (the data, the models, limitations) while nothing is selected. Once an object is selected:
+  - **Classify:** a table with one row per class and one column per model: a bar and percentage per cell, the true class's row marked, and ✓/✗ with the predicted class for each model.
+  - **Label review:** the review form and the object's review history, newest first.
 
 ## Results
 
@@ -186,9 +199,12 @@ Train accuracy is from a separate eval-mode pass with the restored weights. Bala
 - [x] 3D mesh viewer (React Three Fiber)
 - [x] Classify button with both models' class probabilities side by side
 - [x] Filter for misclassified objects (any model, PointNet, or Voxel MLP)
+- [x] Object info strip (file, vertex and face counts) and an About panel
+- [x] Label review form with history
+- [x] SQLite database of label reviews (append-only)
 
-**Annotation:** not in the HW2 version. The HW1 version (tag `hw1-submission`) has annotation.
-**Backend/database:** yes, a backend: a FastAPI model server that serves objects, meshes, and predictions. No database in the HW2 version; the HW1 version's SQLite annotation database is at tag `hw1-submission`.
+**Annotation:** yes. Each object's label can be reviewed (ok / wrong with the correct class / ambiguous), with a mesh-problem flag and a note; every review is kept.
+**Backend/database:** yes. FastAPI serves objects, meshes, predictions, and reviews; label reviews are stored in SQLite (`backend/reviews.db`, gitignored).
 
 ## Libraries and frameworks
 
@@ -254,6 +270,8 @@ npm run dev
 ```
 
 Then open `http://localhost:5173`. The frontend calls `/api/...`, and Vite's dev server forwards those requests to the backend on port 8000, so no CORS setup is needed. If the app runs on a remote machine, forward only port 5173 (for example `ssh -L 5173:localhost:5173 <host>`).
+
+The backend creates `backend/reviews.db` the first time it starts. Delete the file to start with no reviews.
 
 ## AI and borrowed code
 
