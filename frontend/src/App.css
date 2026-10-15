@@ -1,6 +1,6 @@
 .app {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px 1fr 360px;
   height: 100%;
 }
 
@@ -95,10 +95,104 @@
 }
 
 .error {
-  color: #b42318;
+  color: var(--bad);
 }
 
 .viewer {
   width: 100%;
   height: 100%;
+}
+
+.results {
+  padding: 16px;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.classify {
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.classify:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.truth {
+  margin: 14px 0 8px;
+}
+
+.probs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.probs th,
+.probs td {
+  padding: 3px 4px;
+  font-weight: normal;
+  text-align: left;
+}
+
+.probs thead th {
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.probs tbody th {
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.probs tr.is-true {
+  background: var(--accent-bg);
+}
+
+.tag {
+  margin-left: 6px;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 11px;
+}
+
+.verdict.good {
+  color: var(--good);
+}
+
+.verdict.bad {
+  color: var(--bad);
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.track {
+  flex: 1;
+}
+
+/* thin bar, square at the baseline and rounded at the data end */
+.bar {
+  display: block;
+  height: 8px;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+}
+
+.value {
+  width: 3.6em;
+  text-align: right;
+  /* equal-width digits, so values line up down the column */
+  font-variant-numeric: tabular-nums;
 }

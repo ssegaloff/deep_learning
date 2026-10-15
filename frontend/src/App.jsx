@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getObjects } from './api'
+import { getObjects, predict } from './api'
+import PredictionPanel from './components/PredictionPanel'
 import ObjectPicker from './components/ObjectPicker'
 import './App.css'
 import MeshViewer from './components/MeshViewer'
@@ -12,6 +13,8 @@ export default function App() {
   // test by default: those are the objects the models never trained on, so their predictions mean something
   const [split, setSplit] = useState('test')
   const [selectedId, setSelectedId] = useState(null)
+  // { id, status: 'loading' | 'done' | 'error', data?, message? }: tagged with its object, so it can be matched to the selection
+  const [result, setResult] = useState(null)
 
   useEffect(() => {
     // strict mode runs effects twice in dev; the flag drops the first run's response instead of setting state from it
@@ -43,6 +46,20 @@ export default function App() {
     setSplit(s)
     setSelectedId(null)
   }
+  function classify(id) {
+    setResult({ id, status: 'loading' })
+    predict(id)
+      .then((data) => {
+        // the backend echoes the id; a mismatch would show one object's prediction for another, so fail loudly
+        if (data.id !== id) throw new Error(`asked for ${id}, got ${data.id}`)
+        // functional update: a slow response for an earlier click only writes if its object is still the latest request
+        setResult((r) => (r?.id === id ? { id, status: 'done', data } : r))
+      })
+      .catch((err) => setResult((r) => (r?.id === id ? { id, status: 'error', message: err.message } : r)))
+  }
+
+  // derived: a result is shown only under its own object, so a late response can never sit under a different mesh
+  const shown = result?.id === selectedId ? result : null
 
   if (error) return <p className="status error">Could not load objects. {error}</p>
   if (!objects) return <p className="status">Loading objects…</p>
@@ -66,6 +83,9 @@ export default function App() {
         {/* always mounted: the canvas lives as long as the page, so changing class or split never tears down its webgl context */}
         <MeshViewer id={selectedId} />
       </main>
+            <aside className="results">
+        <PredictionPanel selectedId={selectedId} result={shown} onClassify={classify} />
+      </aside>
     </div>
   )
 }

@@ -24,7 +24,6 @@ export default function MeshViewer({ id }) {
       <Canvas camera={{ position: [1.8, 1.2, 1.8], fov: 45 }}>
         <hemisphereLight args={['#ffffff', '#666677', 1.2]} />
         <directionalLight position={[3, 4, 2]} intensity={1.5} />
-        {/* inside the canvas and keyed by id: a failed mesh replaces only the shape, while the canvas, its webgl context, and the camera stay mounted */}
         {id ? (
           // inside the canvas and keyed by id: a failed mesh replaces only the shape, while the canvas, its webgl context, and the camera stay mounted
           <ErrorBoundary
