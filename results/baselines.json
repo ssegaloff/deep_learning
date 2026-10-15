@@ -7,22 +7,26 @@
   "majority": {
     "val": {
       "accuracy": 0.22203672787979967,
-      "macro_f1": 0.03633879781420765
+      "macro_f1": 0.03633879781420765,
+      "balanced_accuracy": 0.1
     },
     "test": {
       "accuracy": 0.11013215859030837,
-      "macro_f1": 0.01984126984126984
+      "macro_f1": 0.01984126984126984,
+      "balanced_accuracy": 0.1
     }
   },
   "logistic_regression": {
     "C": 1.0,
     "val": {
       "accuracy": 0.9098497495826378,
-      "macro_f1": 0.8577774753908949
+      "macro_f1": 0.8577774753908949,
+      "balanced_accuracy": 0.8465675145157094
     },
     "test": {
       "accuracy": 0.8700440528634361,
-      "macro_f1": 0.8659318242252285
+      "macro_f1": 0.8659318242252285,
+      "balanced_accuracy": 0.8625813953488372
     }
   }
 }

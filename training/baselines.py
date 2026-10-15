@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
 
 from shapes.pointcloud import GRID, N_POINTS, load_features
 
@@ -19,6 +19,8 @@ def scores(model, X: np.ndarray, y: np.ndarray) -> dict:
         # macro averages per-class F1 equally, so ignoring the small classes is punished; that matters with chair 8x bathtub
         # zero_division=0: a class that's never predicted has undefined precision, and counting it as 0 is the usual convention
         "macro_f1": float(f1_score(y, pred, average="macro", zero_division=0)),
+        # mean per-class recall: the "avg. class" accuracy the pointnet and voxnet papers report
+        "balanced_accuracy": float(balanced_accuracy_score(y, pred)),
     }
 
 

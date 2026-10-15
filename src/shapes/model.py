@@ -57,3 +57,7 @@ class PointNet(nn.Module):
         x = x.amax(dim=2)
         # logits, as in VoxelMLP: CrossEntropyLoss applies log-softmax itself
         return self.head(x)
+    
+
+# one short name per architecture, shared by train.py and the backend, so a checkpoint's "arch" can only rebuild the class that made it
+MODELS = {"mlp": VoxelMLP, "pointnet": PointNet}
