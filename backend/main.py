@@ -13,6 +13,9 @@ from shapes.manifest import ManifestRow, read_manifest
 from shapes.model import MODELS
 from shapes.pointcloud import GRID, N_POINTS, load_mesh, load_points, normalize, voxelize
 
+from typing import Literal
+
+
 # resolved from this file, not the working directory, so the server finds its files wherever uvicorn is started
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
@@ -25,6 +28,9 @@ PREPARE = {
     "mlp": lambda points: voxelize(points, GRID),
     "pointnet": lambda points: points,
 }
+# objects per forward pass; pointnet's widest activation is batch × 1,024 points × 1,024 channels of float32,
+# about 268 MB at 64 vs. about 3 GB for the largest class-and-split (755 train chairs) in one pass
+BATCH = 64
 
 
 def load_model(path: Path, classes: list[str]) -> torch.nn.Module:
@@ -99,6 +105,22 @@ def get_row(request: Request, obj_id: str) -> ManifestRow:
     return row
 
 
+def run_models(state, ids: list[str]) -> dict[str, np.ndarray]:
+    """class probabilities per architecture, shape (len(ids), n_classes): the one forward path behind /predict and /predictions."""
+    out = {}
+    for arch, model in state.models.items():
+        chunks = []
+        for start in range(0, len(ids), BATCH):
+            batch = np.stack([PREPARE[arch](state.points[i]) for i in ids[start:start + BATCH]])
+            x = torch.from_numpy(batch).to(DEVICE)
+            # eval mode: batch norm uses its running averages, so an object's output doesn't depend on which others share its batch
+            with torch.inference_mode():
+                # the models return logits; softmax turns them into probabilities only for display
+                chunks.append(torch.softmax(model(x), dim=1).numpy())
+        out[arch] = np.concatenate(chunks)
+    return out
+
+
 # plain def, not async def: fastapi runs these in a thread pool, so slow file reads and torch calls don't block other requests
 @app.get("/objects")
 def list_objects(request: Request) -> list[dict]:
@@ -123,17 +145,34 @@ class PredictRequest(BaseModel):
 def predict(body: PredictRequest, request: Request) -> dict:
     state = request.app.state
     row = get_row(request, body.id)
-    points = state.points[row.id]
-    predictions = {}
-    for arch, model in state.models.items():
-        # batch of one: the models expect a leading batch dimension
-        x = torch.from_numpy(PREPARE[arch](points)).unsqueeze(0).to(DEVICE)
-        # inference_mode skips all autograd bookkeeping: a stricter, slightly faster no_grad
-        with torch.inference_mode():
-            # the models return logits; softmax turns them into probabilities only for display
-            probs = torch.softmax(model(x), dim=1)[0]
-        predictions[arch] = {
-            "predicted": state.classes[int(probs.argmax())],
-            "probabilities": dict(zip(state.classes, probs.tolist(), strict=True)),
+    # a batch of one through the same path as /predictions, so the list's label and this one can't disagree
+    probs = run_models(state, [row.id])
+    predictions = {
+        arch: {
+            "predicted": state.classes[int(p[0].argmax())],
+            "probabilities": dict(zip(state.classes, p[0].tolist(), strict=True)),
         }
+        for arch, p in probs.items()
+    }
     return {"id": row.id, "true_class": row.class_name, "split": row.split, "predictions": predictions}
+
+
+@app.get("/predictions")
+def list_predictions(request: Request, split: Literal["train", "val", "test"], class_name: str | None = None) -> list[dict]:
+    state = request.app.state
+    # an unknown class would match nothing and return an empty list, which looks exactly like "no errors"
+    if class_name is not None and class_name not in state.classes:
+        raise HTTPException(status_code=422, detail=f"unknown class {class_name!r}")
+    rows = [r for r in state.rows.values() if r.split == split and class_name in (None, r.class_name)]
+    if not rows:
+        return []
+    probs = run_models(state, [r.id for r in rows])
+    # labels only: the list needs right or wrong, and the full breakdown comes from /predict on click
+    return [
+        {
+            "id": r.id,
+            "true_class": r.class_name,
+            "predicted": {arch: state.classes[int(p[i].argmax())] for arch, p in probs.items()},
+        }
+        for i, r in enumerate(rows)
+    ]
