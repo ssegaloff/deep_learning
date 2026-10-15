@@ -51,3 +51,53 @@ def evaluate(model: nn.Module, loader: DataLoader, loss_fn: nn.Module) -> tuple[
     # predictions come back separately, for the confusion matrix and for finding a misclassified object for the video
     return metrics, preds
 
+
+def train_one_epoch(
+    model: nn.Module, loader: DataLoader, loss_fn: nn.Module, optimizer: torch.optim.Optimizer
+) -> tuple[float, float]:
+    # train mode turns dropout on (and, for pointnet later, makes batch norm use batch statistics)
+    model.train()
+    total_loss, correct, n = 0.0, 0, 0
+    for X, y in loader:
+        # gradients accumulate across backward() calls by default, so clear last batch's before computing this one's
+        optimizer.zero_grad()
+        logits = model(X)
+        loss = loss_fn(logits, y)
+        # backprop: fills .grad on every parameter with d(loss)/d(parameter)
+        loss.backward()
+        # the gradient-descent update; adamw scales each step per weight and applies weight decay directly to the weights
+        optimizer.step()
+        # .item() syncs with the gpu once per batch; cheap at ~53 batches per epoch
+        total_loss += loss.item() * len(y)
+        correct += (logits.argmax(dim=1) == y).sum().item()
+        n += len(y)
+    # running averages over an epoch where the weights kept changing and dropout was on, so they read a bit worse than an eval-mode pass would
+    return total_loss / n, correct / n
+
+
+def fit(
+    model: nn.Module,
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    loss_fn: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    max_epochs: int = 200,
+    patience: int = 15,
+) -> tuple[list[dict], int]:
+    history, best_loss, best_epoch, best_state = [], float("inf"), 0, None
+    for epoch in range(1, max_epochs + 1):
+        train_loss, train_acc = train_one_epoch(model, train_loader, loss_fn, optimizer)
+        val, _ = evaluate(model, val_loader, loss_fn)
+        history.append({"epoch": epoch, "train_loss": train_loss, "train_accuracy": train_acc,
+                        **{f"val_{k}": v for k, v in val.items()}})
+        print(f"epoch {epoch:3d}  train {train_loss:.4f} / {train_acc:.3f}  val {val['loss']:.4f} / {val['accuracy']:.3f}")
+        # select on val loss: it moves smoothly, while accuracy and f1 jump in steps of one object
+        if val["loss"] < best_loss:
+            best_loss, best_epoch = val["loss"], epoch
+            # state_dict() returns references to the live tensors, so without clone() this "snapshot" would keep training
+            best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        elif epoch - best_epoch >= patience:
+            break
+    # hand back the selected model, not whatever the last epoch happened to leave
+    model.load_state_dict(best_state)
+    return history, best_epoch
