@@ -71,6 +71,9 @@ def voxelize(points: np.ndarray, grid: int = GRID) -> np.ndarray:
 def load_features(path: Path) -> tuple[np.ndarray, np.ndarray]:
     # NpzFile holds the file open; the with block closes it as soon as the arrays are read
     with np.load(path) as d:
+        # slicing past the end returns fewer points without complaint, so check instead of trusting it
+        if d["n_points"] < N_POINTS:
+            raise ValueError(f"{path} stores {d['n_points']} points per object; N_POINTS is {N_POINTS}")
         # the first N_POINTS form a fixed sample; stored points are independent draws, so any fixed prefix is a valid uniform sample
         X = np.stack([voxelize(p[:N_POINTS], GRID) for p in d["points"]])
         y = d["labels"]

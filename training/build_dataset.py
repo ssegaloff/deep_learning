@@ -22,7 +22,7 @@ def main() -> None:
     )
     parser.add_argument("--manifest-dir", type=Path, default=Path("data"))
     parser.add_argument("--out-dir", type=Path, default=Path("data/points"))
-    # store more than the model uses, so training can draw a fresh subset each epoch
+    # store more than the model uses, so an optional resampling experiment doesn't need to reload meshes
     parser.add_argument("--n-points", type=int, default=2048)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
