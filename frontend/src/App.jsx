@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getObject, getObjects, getPredictions, predict } from './api'
 import ObjectInfo from './components/ObjectInfo'
+import About from './components/About'
 import { FILTERS } from './models'
 import PredictionPanel from './components/PredictionPanel'
 import ObjectPicker from './components/ObjectPicker'
@@ -136,8 +137,9 @@ export default function App() {
         {/* always mounted: the canvas lives as long as the page, so changing class or split never tears down its webgl context */}
         <MeshViewer id={selectedId} />
       </main>
-          <aside className="results">
-        <PredictionPanel selectedId={selectedId} result={shown} onClassify={classify} />
+      <aside className="results">
+        {/* about while nothing is selected; the classify panel takes over once there's an object to classify */}
+        {selectedId ? <PredictionPanel selectedId={selectedId} result={shown} onClassify={classify} /> : <About />}
       </aside>
     </div>
   )

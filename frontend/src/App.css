@@ -222,3 +222,16 @@
   /* equal-width digits, so values line up down the column */
   font-variant-numeric: tabular-nums;
 }
+
+.about h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.about p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}

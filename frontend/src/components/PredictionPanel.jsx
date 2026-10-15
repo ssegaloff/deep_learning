@@ -4,7 +4,6 @@ import { MODEL_LABELS } from '../models'
 const pct = (p) => `${(p * 100).toFixed(1)}%`
 
 export default function PredictionPanel({ selectedId, result, onClassify }) {
-  if (!selectedId) return <p className="muted">Select an object to classify it.</p>
   const loading = result?.status === 'loading'
   return (
     <div className="prediction">
