@@ -6,8 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
-from shapeprep.manifest import read_manifest
-from shapeprep.pointcloud import load_mesh, normalize, sample_points
+from shapes.manifest import read_manifest
+from shapes.pointcloud import load_mesh, normalize, sample_points
 
 SPLITS = ("train", "val", "test")
 

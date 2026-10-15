@@ -24,7 +24,7 @@ ModelNet's own training set is imbalanced: chair has 889 models and bathtub has 
 
 ## Pipeline
 
-### 1. Manifest: `src/shapeprep/manifest.py`
+### 1. Manifest: `src/shapes/manifest.py`
 
 Writes `data/manifest.csv` (one row per mesh: `id, class_name, label, split, source_split, relpath`) and `data/meta.json` (class list, validation fraction, seed). Both are committed.
 
@@ -33,7 +33,7 @@ Writes `data/manifest.csv` (one row per mesh: `id, class_name, label, split, sou
 - **The class list is stored, never re-derived**, so label numbers can't shift under a trained model.
 - **Deterministic:** re-running produces a byte-identical CSV.
 
-### 2. Mesh preprocessing: `src/shapeprep/pointcloud.py`
+### 2. Mesh preprocessing: `src/shapes/pointcloud.py`
 
 Shared by training and the backend, so the model sees the same preprocessing at prediction time as in training.
 
@@ -62,7 +62,7 @@ The files are not committed; rebuild them with the steps below.
 
 ### 4. Features and baselines: `training/baselines.py`
 
-**Features: binary voxel occupancy** (`voxelize` in `src/shapeprep/pointcloud.py`).
+**Features: binary voxel occupancy** (`voxelize` in `src/shapes/pointcloud.py`).
 - Take the first 1,024 stored points of each object.
 - Divide the cube [−1, 1]³ into a 16×16×16 grid.
 - Mark each cell 1 if any point falls in it, giving 4,096 features.
@@ -132,7 +132,7 @@ export MODELNET_ROOT=/path/to/ModelNet10
 ### Rebuild the data
 
 ```bash
-uv run python -m shapeprep.manifest --out-dir data
+uv run python -m shapes.manifest --out-dir data
 uv run python training/build_dataset.py
 ```
 

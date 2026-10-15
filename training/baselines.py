@@ -9,7 +9,7 @@ from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 
-from shapeprep.pointcloud import voxelize
+from shapes.pointcloud import voxelize
 
 N_POINTS = 1024
 GRID = 16

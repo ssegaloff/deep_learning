@@ -116,7 +116,7 @@ def read_manifest(out_dir: Path) -> tuple[list[ManifestRow], list[str]]:
 
 
 def main() -> None:
-    """CLI: python -m shapeprep.manifest --out-dir data"""
+    """CLI: python -m shapes.manifest --out-dir data"""
     parser = argparse.ArgumentParser(description=__doc__) # inside main, __doc__ is the module's docstring, not the functions, which is what --help should show
     parser.add_argument(
         "--data-root",
