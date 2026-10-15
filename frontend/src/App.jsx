@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getObjects, getPredictions, predict } from './api'
+import { getObject, getObjects, getPredictions, predict } from './api'
+import ObjectInfo from './components/ObjectInfo'
 import { FILTERS } from './models'
 import PredictionPanel from './components/PredictionPanel'
 import ObjectPicker from './components/ObjectPicker'
@@ -19,6 +20,8 @@ export default function App() {
   const [filter, setFilter] = useState('all')
   // predicted labels per `${split}/${class}`; keyed, so a late response lands under its own class and split, never the current one
   const [labels, setLabels] = useState({})
+  // { id, data } or { id, error }: tagged with its object, like result
+  const [info, setInfo] = useState(null)
 
   useEffect(() => {
     // strict mode runs effects twice in dev; the flag drops the first run's response instead of setting state from it
@@ -28,6 +31,16 @@ export default function App() {
       .catch((err) => { if (!ignore) setError(err.message) })
     return () => { ignore = true }
   }, [])
+
+  useEffect(() => {
+    if (!selectedId) return
+    // a fast click sequence can return out of order; the flag drops every response but the current selection's
+    let ignore = false
+    getObject(selectedId)
+      .then((data) => { if (!ignore) setInfo({ id: selectedId, data }) })
+      .catch((err) => { if (!ignore) setInfo({ id: selectedId, error: err.message }) })
+    return () => { ignore = true }
+  }, [selectedId])
 
   // display only: labels travel as class-name strings, so this order can't shift a prediction
   const classes = useMemo(
@@ -92,6 +105,9 @@ export default function App() {
 
   // derived: a result is shown only under its own object, so a late response can never sit under a different mesh
   const shown = result?.id === selectedId ? result : null
+  // derived: while a new object's info is in flight, the stored info belongs to the old id and isn't shown
+  const shownInfo = info?.id === selectedId ? info : null
+  const selected = selectedId ? objects?.find((o) => o.id === selectedId) : null
 
   if (error) return <p className="status error">Could not load objects. {error}</p>
   if (!objects) return <p className="status">Loading objects…</p>
@@ -116,10 +132,11 @@ export default function App() {
         />
       </aside>
       <main className="main">
+        <ObjectInfo object={selected} info={shownInfo} />
         {/* always mounted: the canvas lives as long as the page, so changing class or split never tears down its webgl context */}
         <MeshViewer id={selectedId} />
       </main>
-            <aside className="results">
+          <aside className="results">
         <PredictionPanel selectedId={selectedId} result={shown} onClassify={classify} />
       </aside>
     </div>

@@ -128,6 +128,23 @@ def list_objects(request: Request) -> list[dict]:
     return [{"id": r.id, "class_name": r.class_name, "split": r.split} for r in request.app.state.rows.values()]
 
 
+@app.get("/objects/{obj_id}")
+def get_object(obj_id: str, request: Request) -> dict:
+    row = get_row(request, obj_id)
+    # the same load as /mesh (unused vertices dropped), so the counts describe the mesh on screen
+    mesh = load_mesh(request.app.state.mesh_root / row.relpath)
+    return {
+        "id": row.id,
+        "class_name": row.class_name,
+        "split": row.split,
+        # val is carved out of modelnet's train folder, so split alone doesn't say where the file came from
+        "source_split": row.source_split,
+        "relpath": row.relpath,
+        "n_vertices": len(mesh.vertices),
+        "n_faces": len(mesh.faces),
+    }
+
+
 @app.get("/objects/{obj_id}/mesh")
 def get_mesh(obj_id: str, request: Request) -> Response:
     row = get_row(request, obj_id)

@@ -84,10 +84,41 @@
 
 .main {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  /* lets the canvas in section 3 shrink with the window instead of forcing the grid column wider */
+  flex-direction: column;
+  /* lets the canvas shrink with the window instead of forcing the grid column wider */
   min-width: 0;
+  min-height: 0;
+}
+
+.info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 0;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.info div {
+  display: flex;
+  gap: 6px;
+}
+
+.info dt {
+  color: var(--muted);
+}
+
+.info dd {
+  margin: 0;
+  font-family: var(--mono);
+}
+
+.viewer {
+  /* takes whatever height the strip leaves; min-height 0 lets the canvas shrink rather than overflow */
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
 
 .status {
@@ -96,11 +127,6 @@
 
 .error {
   color: var(--bad);
-}
-
-.viewer {
-  width: 100%;
-  height: 100%;
 }
 
 .results {

@@ -33,3 +33,7 @@ export async function getPredictions(split, className) {
   const query = new URLSearchParams({ split, class_name: className })
   return (await request(`/predictions?${query}`)).json()
 }
+
+export async function getObject(id) {
+  return (await request(`/objects/${encodeURIComponent(id)}`)).json()
+}
