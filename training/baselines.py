@@ -9,19 +9,7 @@ from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 
-from shapes.pointcloud import voxelize
-
-N_POINTS = 1024
-GRID = 16
-
-
-def load_features(path: Path) -> tuple[np.ndarray, np.ndarray]:
-    # NpzFile holds the file open; the with block closes it as soon as the arrays are read
-    with np.load(path) as d:
-        # the first N_POINTS form a fixed sample; stored points are independent draws, so any fixed prefix is a valid uniform sample
-        X = np.stack([voxelize(p[:N_POINTS], GRID) for p in d["points"]])
-        y = d["labels"]
-    return X, y
+from shapes.pointcloud import GRID, N_POINTS, load_features
 
 
 def scores(model, X: np.ndarray, y: np.ndarray) -> dict:

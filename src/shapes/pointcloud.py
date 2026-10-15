@@ -4,6 +4,10 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
+# these define the model's input; training, baselines, and the backend must agree, so they live in one place
+N_POINTS = 1024
+GRID = 16
+
 
 def load_mesh(path: Path) -> trimesh.Trimesh:
     # force="mesh" so a multi-part file comes back as one Trimesh instead of a Scene
@@ -29,6 +33,7 @@ def normalize(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     out.apply_scale(1.0 / radius)
     return out
 
+
 def sample_points(mesh: trimesh.Trimesh, n: int, rng: np.random.Generator) -> np.ndarray:
     areas = mesh.area_faces
     total = areas.sum()
@@ -49,7 +54,7 @@ def sample_points(mesh: trimesh.Trimesh, n: int, rng: np.random.Generator) -> np
     return (a + u * (b - a) + v * (c - a)).astype(np.float32)
 
 
-def voxelize(points: np.ndarray, grid: int = 16) -> np.ndarray:
+def voxelize(points: np.ndarray, grid: int = GRID) -> np.ndarray:
     # a point outside the unit sphere means normalize was skipped; fail loudly instead of clipping it into a border cell
     # the 1e-5 slack absorbs float32 rounding of points that sit exactly on the sphere
     if np.abs(points).max() > 1 + 1e-5:
@@ -61,3 +66,12 @@ def voxelize(points: np.ndarray, grid: int = 16) -> np.ndarray:
     occ[idx[:, 0], idx[:, 1], idx[:, 2]] = 1.0
     # flatten for logistic regression and the MLP; the 3D layout only matters to a convolutional model
     return occ.ravel()
+
+
+def load_features(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    # NpzFile holds the file open; the with block closes it as soon as the arrays are read
+    with np.load(path) as d:
+        # the first N_POINTS form a fixed sample; stored points are independent draws, so any fixed prefix is a valid uniform sample
+        X = np.stack([voxelize(p[:N_POINTS], GRID) for p in d["points"]])
+        y = d["labels"]
+    return X, y
