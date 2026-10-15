@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { getObjects } from './api'
 import ObjectPicker from './components/ObjectPicker'
 import './App.css'
+import MeshViewer from './components/MeshViewer'
+
 
 export default function App() {
   const [objects, setObjects] = useState(null)
@@ -61,7 +63,8 @@ export default function App() {
         />
       </aside>
       <main className="main">
-        {selectedId ? <p>Selected: {selectedId}</p> : <p className="muted">Pick an object.</p>}
+        {/* always mounted: the canvas lives as long as the page, so changing class or split never tears down its webgl context */}
+        <MeshViewer id={selectedId} />
       </main>
     </div>
   )
