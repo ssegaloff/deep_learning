@@ -1,111 +1,77 @@
-"""
-Minimal annotation backend for the building-footprint viewer.
+"""hw2 model server: loads both trained classifiers once at startup and serves objects, meshes, and predictions."""
 
-Scope (deliberately minimal per the HW1 scaffold allowance):
-- Does NOT serve the base GeoJSON — the frontend keeps loading that from
-  the static file it already has. This backend only persists annotations
-  (label/flag status + user-drawn footprints).
-- One table, two routes: GET all annotations, POST to upsert one.
+from contextlib import asynccontextmanager
+from pathlib import Path
 
-Run with:
-    pip install fastapi uvicorn
-    uvicorn main:app --reload --port 8000
-"""
-
-import sqlite3
-from contextlib import contextmanager
-from datetime import datetime, timezone
-
+import numpy as np
+import torch
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
-DB_PATH = "annotations.db"
+from shapes.manifest import ManifestRow, read_manifest
+from shapes.model import MODELS
+from shapes.pointcloud import GRID, N_POINTS, load_points
 
-app = FastAPI()
-
-# CORS: your Vite dev server (localhost:5173) and this API (localhost:8000)
-# are different origins as far as the browser is concerned, even though
-# they're both "localhost". Without this, every fetch() from the frontend
-# fails silently in the browser console with a CORS error, not a 404 —
-# that's the #1 thing that eats time here if you skip it.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+# resolved from this file, not the working directory, so the server finds its files wherever uvicorn is started
+ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT / "data"
+MODEL_DIR = ROOT / "backend" / "model"
+SPLITS = ("train", "val", "test")
+# inference is one object per click, so cpu is fast enough, and the gpu stays free for training runs
+DEVICE = torch.device("cpu")
 
 
-def init_db():
-    with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS annotations (
-                footprint_id TEXT PRIMARY KEY,
-                status TEXT NOT NULL DEFAULT 'unchanged',
-                note TEXT,
-                source TEXT NOT NULL DEFAULT 'microsoft',
-                geometry TEXT,
-                updated_at TEXT
-            )
-            """
-        )
+def load_model(path: Path, classes: list[str]) -> torch.nn.Module:
+    # weights_only defaults to True: torch.load refuses arbitrary pickled objects, so loading a file can't run code
+    ckpt = torch.load(path, map_location=DEVICE)
+    # load_state_dict catches wrong shapes; these catch mismatches with the right shapes and the wrong meaning
+    if ckpt["arch"] != path.stem:
+        raise ValueError(f"{path.name} holds a {ckpt['arch']!r} model")
+    if ckpt["classes"] != classes:
+        raise ValueError(f"{path.name} was trained with classes {ckpt['classes']}; meta.json has {classes}")
+    if ckpt["n_points"] != N_POINTS:
+        raise ValueError(f"{path.name} was trained on {ckpt['n_points']} points; N_POINTS is {N_POINTS}")
+    if ckpt["arch"] == "mlp" and ckpt["grid"] != GRID:
+        raise ValueError(f"{path.name} was trained on a {ckpt['grid']}^3 grid; GRID is {GRID}")
+    model = MODELS[ckpt["arch"]](**ckpt["model_kwargs"])
+    # strict by default: a missing or unexpected key is an error, not a silently random layer
+    model.load_state_dict(ckpt["state_dict"])
+    # dropout off, and batch norm uses its running averages instead of the current batch's statistics
+    return model.to(DEVICE).eval()
 
 
-@contextmanager
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.close()
+def load_all_points(rows: list[ManifestRow]) -> dict[str, np.ndarray]:
+    label_of = {r.id: r.label for r in rows}
+    points = {}
+    for split in SPLITS:
+        path = DATA_DIR / "points" / f"{split}.npz"
+        # load_points decides which stored points a model sees, so the backend gets the same 1,024 that training used
+        pts, labels = load_points(path)
+        # ids sit in the same file in the same order; load_points doesn't return them, so read them alongside
+        with np.load(path) as d:
+            ids = d["ids"]
+        for obj_id, p, label in zip(ids, pts, labels, strict=True):
+            obj_id = str(obj_id)
+            # a mismatch means the .npz and the manifest drifted apart, and every prediction would be shown against the wrong label
+            if label_of[obj_id] != label:
+                raise ValueError(f"{obj_id}: label {label} in {path.name}, {label_of[obj_id]} in the manifest")
+            points[obj_id] = p
+    if points.keys() != label_of.keys():
+        raise ValueError("the .npz files and the manifest list different objects")
+    return points
 
 
-class Annotation(BaseModel):
-    footprint_id: str | int
-    status: str = "unchanged"  # unchanged | modified | demolished | new
-    note: str | None = None
-    source: str = "microsoft"  # microsoft | user_drawn
-    geometry: str | None = None  # GeoJSON geometry as a JSON string; only
-    # populated for source == "user_drawn", since Microsoft-sourced rows
-    # already have their geometry in the static GeoJSON the frontend loads.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    rows, classes = read_manifest(DATA_DIR)
+    app.state.classes = classes
+    app.state.rows = {r.id: r for r in rows}
+    app.state.points = load_all_points(rows)
+    # every registered architecture, so the app can show them side by side; a missing .pt fails here, not on the first click
+    app.state.models = {arch: load_model(MODEL_DIR / f"{arch}.pt", classes) for arch in MODELS}
+    for arch, model in app.state.models.items():
+        print(f"loaded {arch}: {sum(p.numel() for p in model.parameters()):,} parameters")
+    print(f"loaded {len(app.state.points):,} objects")
+    yield
 
 
-@app.on_event("startup")
-def on_startup():
-    init_db()
-
-
-@app.get("/annotations")
-def list_annotations():
-    with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM annotations").fetchall()
-        return [dict(row) for row in rows]
-
-
-@app.post("/annotations")
-def upsert_annotation(annotation: Annotation):
-    # INSERT OR REPLACE keyed on footprint_id: covers both "first time
-    # annotating this footprint" and "updating an existing annotation"
-    # with one code path, since the frontend always sends full current
-    # state rather than a partial patch.
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO annotations
-                (footprint_id, status, note, source, geometry, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                annotation.footprint_id,
-                annotation.status,
-                annotation.note,
-                annotation.source,
-                annotation.geometry,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        conn.commit()
-    return {"ok": True, "footprint_id": annotation.footprint_id}
+app = FastAPI(lifespan=lifespan)
