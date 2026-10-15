@@ -68,13 +68,26 @@ def voxelize(points: np.ndarray, grid: int = GRID) -> np.ndarray:
     return occ.ravel()
 
 
-def load_features(path: Path) -> tuple[np.ndarray, np.ndarray]:
+def _load_prefix(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    # one place decides which stored points a model sees, so the voxel models and pointnet get the identical 1,024 points
     # NpzFile holds the file open; the with block closes it as soon as the arrays are read
     with np.load(path) as d:
         # slicing past the end returns fewer points without complaint, so check instead of trusting it
         if d["n_points"] < N_POINTS:
             raise ValueError(f"{path} stores {d['n_points']} points per object; N_POINTS is {N_POINTS}")
         # the first N_POINTS form a fixed sample; stored points are independent draws, so any fixed prefix is a valid uniform sample
-        X = np.stack([voxelize(p[:N_POINTS], GRID) for p in d["points"]])
-        y = d["labels"]
-    return X, y
+        # the copy matters: a plain slice is a view that keeps the full 2,048-point array alive in memory
+        points = np.ascontiguousarray(d["points"][:, :N_POINTS])
+        labels = d["labels"]
+    return points, labels
+
+
+def load_features(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    points, labels = _load_prefix(path)
+    return np.stack([voxelize(p, GRID) for p in points]), labels
+
+
+def load_points(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    # pointnet reads coordinates directly: float32 (n, N_POINTS, 3), no voxelization
+    # kept in the natural (object, point, xyz) layout; if the model wants channels first for Conv1d, it transposes inside forward
+    return _load_prefix(path)
