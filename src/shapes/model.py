@@ -21,3 +21,4 @@ class VoxelMLP(nn.Module):
         # returns logits, not probabilities: CrossEntropyLoss applies log-softmax itself, so a softmax here would be applied twice
         # the backend applies softmax when it needs probabilities to display
         return self.net(x)
+    
