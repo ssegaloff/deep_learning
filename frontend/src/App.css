@@ -1,13 +1,99 @@
-#center {
+.app {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100%;
+}
+
+.sidebar {
   display: flex;
   flex-direction: column;
-  gap: 25px;
-  place-content: center;
-  place-items: stretch;
-  flex-grow: 1;
+  gap: 12px;
+  padding: 16px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  /* flex and grid children default to min-height: auto, which grows the column to fit a long list instead of letting the list scroll */
+  min-height: 0;
+}
 
-  @media (max-width: 1024px) {
-    padding: 32px 20px 24px;
-    gap: 18px;
-  }
+.sidebar h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.picker label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.picker select {
+  font: inherit;
+  padding: 2px 4px;
+}
+
+.count,
+.muted {
+  margin: 0;
+  color: var(--muted);
+}
+
+.count {
+  font-size: 13px;
+}
+
+.object-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.object-list button {
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: 13px var(--mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.object-list button:hover {
+  background: var(--accent-bg);
+}
+
+.object-list button[aria-pressed='true'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.main {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* lets the canvas in section 3 shrink with the window instead of forcing the grid column wider */
+  min-width: 0;
+}
+
+.status {
+  padding: 16px;
+}
+
+.error {
+  color: #b42318;
 }
