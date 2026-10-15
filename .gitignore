@@ -34,3 +34,6 @@ __pycache__
 # label reviews: user-generated state
 *.db
 *.db-journal
+
+# documents pdfs
+documents/*.pdf
