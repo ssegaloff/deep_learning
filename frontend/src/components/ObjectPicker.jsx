@@ -1,6 +1,17 @@
+import { FILTERS } from '../models'
+
 const SPLITS = ['test', 'val', 'train']
 
-export default function ObjectPicker({ classes, selectedClass, split, objects, selectedId, onClassChange, onSplitChange, onSelect }) {
+function Count({ filter, shown, total, loadState }) {
+  if (loadState?.status === 'loading') return <p className="count">Loading predictions…</p>
+  if (loadState?.status === 'error') return <p className="count error">Could not load predictions. {loadState.message}</p>
+  return <p className="count">{filter === 'all' ? `${shown} objects` : `${shown} of ${total} objects`}</p>
+}
+
+export default function ObjectPicker({
+  classes, selectedClass, split, filter, objects, total, loadState, selectedId,
+  onClassChange, onSplitChange, onFilterChange, onSelect,
+}) {
   return (
     <div className="picker">
       {/* wrapping label: the select gets its accessible name without an id/htmlFor pair */}
@@ -16,7 +27,13 @@ export default function ObjectPicker({ classes, selectedClass, split, objects, s
           {SPLITS.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
       </label>
-      <p className="count">{objects.length} objects</p>
+      <label>
+        Show
+        <select value={filter} onChange={(e) => onFilterChange(e.target.value)}>
+          {Object.entries(FILTERS).map(([key, f]) => <option key={key} value={key}>{f.label}</option>)}
+        </select>
+      </label>
+      <Count filter={filter} shown={objects.length} total={total} loadState={loadState} />
       <ul className="object-list">
         {objects.map((o) => (
           // ids are unique and stable, so react keeps each row's identity when the filter changes

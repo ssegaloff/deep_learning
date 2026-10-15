@@ -1,5 +1,5 @@
 // display names for the backend's architecture keys; an unknown key falls back to the key itself
-const MODEL_LABELS = { mlp: 'Voxel MLP', pointnet: 'PointNet' }
+import { MODEL_LABELS } from '../models'
 
 const pct = (p) => `${(p * 100).toFixed(1)}%`
 

@@ -27,3 +27,9 @@ export async function predict(id) {
   })
   return res.json()
 }
+
+export async function getPredictions(split, className) {
+  // URLSearchParams escapes the values, so no class name can break the query string
+  const query = new URLSearchParams({ split, class_name: className })
+  return (await request(`/predictions?${query}`)).json()
+}

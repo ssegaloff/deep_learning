@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getObjects, predict } from './api'
+import { getObjects, getPredictions, predict } from './api'
+import { FILTERS } from './models'
 import PredictionPanel from './components/PredictionPanel'
 import ObjectPicker from './components/ObjectPicker'
 import './App.css'
@@ -15,6 +16,9 @@ export default function App() {
   const [selectedId, setSelectedId] = useState(null)
   // { id, status: 'loading' | 'done' | 'error', data?, message? }: tagged with its object, so it can be matched to the selection
   const [result, setResult] = useState(null)
+  const [filter, setFilter] = useState('all')
+  // predicted labels per `${split}/${class}`; keyed, so a late response lands under its own class and split, never the current one
+  const [labels, setLabels] = useState({})
 
   useEffect(() => {
     // strict mode runs effects twice in dev; the flag drops the first run's response instead of setting state from it
@@ -36,15 +40,43 @@ export default function App() {
     () => (objects ? objects.filter((o) => o.class_name === activeClass && o.split === split) : []),
     [objects, activeClass, split],
   )
+  const entry = filter === 'all' ? null : labels[`${split}/${activeClass}`]
+  const listed = useMemo(() => {
+    if (filter === 'all') return visible
+    if (entry?.status !== 'done') return []
+    return visible.filter((o) => FILTERS[filter].keep(entry.byId[o.id], o.class_name))
+  }, [filter, entry, visible])
 
   // cleared in the handler, not an effect, so no render ever shows a selection outside the list
+  function loadLabels(s, c) {
+    const key = `${s}/${c}`
+    // fixed weights give fixed predictions, so each class and split is fetched once; a failed fetch is retried next time
+    if (labels[key] && labels[key].status !== 'error') return
+    setLabels((l) => ({ ...l, [key]: { status: 'loading' } }))
+    getPredictions(s, c)
+      .then((rows) => {
+        const byId = Object.fromEntries(rows.map((r) => [r.id, r.predicted]))
+        setLabels((l) => ({ ...l, [key]: { status: 'done', byId } }))
+      })
+      .catch((err) => setLabels((l) => ({ ...l, [key]: { status: 'error', message: err.message } })))
+  }
+
+  // cleared in the handler, not an effect, so no render ever shows a selection outside the list;
+  // the fetch also starts here, because each of these user actions is what makes the labels needed
   function changeClass(c) {
     setSelectedClass(c)
     setSelectedId(null)
+    if (filter !== 'all') loadLabels(split, c)
   }
   function changeSplit(s) {
     setSplit(s)
     setSelectedId(null)
+    if (filter !== 'all') loadLabels(s, activeClass)
+  }
+  function changeFilter(f) {
+    setFilter(f)
+    setSelectedId(null)
+    if (f !== 'all') loadLabels(split, activeClass)
   }
   function classify(id) {
     setResult({ id, status: 'loading' })
@@ -72,10 +104,14 @@ export default function App() {
           classes={classes}
           selectedClass={activeClass}
           split={split}
-          objects={visible}
+          filter={filter}
+          objects={listed}
+          total={visible.length}
+          loadState={entry}
           selectedId={selectedId}
           onClassChange={changeClass}
           onSplitChange={changeSplit}
+          onFilterChange={changeFilter}
           onSelect={setSelectedId}
         />
       </aside>
