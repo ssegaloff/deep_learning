@@ -235,3 +235,82 @@
   font-size: 13px;
   line-height: 1.5;
 }
+
+.review {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.review h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.review fieldset {
+  margin: 0 0 8px;
+  padding: 0;
+  border: 0;
+}
+
+.review legend {
+  margin-bottom: 4px;
+}
+
+.review .choice {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0;
+}
+
+.review .field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0;
+}
+
+.review textarea {
+  font: inherit;
+  resize: vertical;
+}
+
+.save {
+  margin-top: 4px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.history {
+  margin: 16px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.history li {
+  margin-bottom: 8px;
+}
+
+.history time {
+  display: block;
+}
+
+.history .note {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+}

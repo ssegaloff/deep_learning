@@ -5,8 +5,9 @@ import About from './components/About'
 import { FILTERS } from './models'
 import PredictionPanel from './components/PredictionPanel'
 import ObjectPicker from './components/ObjectPicker'
-import './App.css'
 import MeshViewer from './components/MeshViewer'
+import ReviewPanel from './components/ReviewPanel'
+import './App.css'
 
 
 export default function App() {
@@ -139,7 +140,20 @@ export default function App() {
       </main>
       <aside className="results">
         {/* about while nothing is selected; the classify panel takes over once there's an object to classify */}
-        {selectedId ? <PredictionPanel selectedId={selectedId} result={shown} onClassify={classify} /> : <About />}
+        {selectedId ? (
+          <>
+            <PredictionPanel selectedId={selectedId} result={shown} onClassify={classify} />
+            {/* keyed: a new object gets a fresh form and history instead of the last object's draft */}
+            <ReviewPanel
+              key={selectedId}
+              id={selectedId}
+              trueClass={selected.class_name}
+              classes={classes}
+              // only a finished result counts: while loading or after an error, no probabilities were on screen
+              sawPrediction={shown?.status === 'done'}
+            />
+          </>
+        ) : <About />}
       </aside>
     </div>
   )

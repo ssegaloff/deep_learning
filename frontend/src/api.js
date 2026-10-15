@@ -37,3 +37,17 @@ export async function getPredictions(split, className) {
 export async function getObject(id) {
   return (await request(`/objects/${encodeURIComponent(id)}`)).json()
 }
+
+export async function getReviews(id) {
+  return (await request(`/objects/${encodeURIComponent(id)}/reviews`)).json()
+}
+
+// body: { verdict, should_be, mesh_problem, saw_prediction, note }; returns the stored row
+export async function addReview(id, body) {
+  const res = await request(`/objects/${encodeURIComponent(id)}/reviews`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return res.json()
+}
