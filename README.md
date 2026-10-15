@@ -57,7 +57,7 @@ Samples 2,048 points from every normalized mesh, once, and writes `data/points/{
 
 The files are not committed; rebuild them with the steps below.
 
-- **Why 2,048 points when the model uses fewer:** training draws a fresh random subset of each object's points every epoch, as augmentation. Validation, test, and the backend use a fixed subset. Meshes are loaded only once.
+- Why 2,048 points when the model uses 1,024: every split and both models use the first 1,024 stored points, so the comparison is on identical inputs. The extra points leave room for an optional augmentation experiment (a fresh random subset each epoch) without reloading meshes.
 - **Reproducibility:** one random generator, consumed in manifest order, so a single seed reproduces every file.
 
 ### 4. Features and baselines: `training/baselines.py`
