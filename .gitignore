@@ -29,3 +29,6 @@ __pycache__
 /documents/hw2-video-outline.md
 /documents/hw2-decisions.md
 
+# label reviews: user-generated state
+*.db
+*.db-journal

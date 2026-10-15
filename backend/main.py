@@ -1,8 +1,11 @@
 """hw2 model server: loads both trained classifiers once at startup and serves objects, meshes, and predictions."""
 
 import os
-from contextlib import asynccontextmanager
+import sqlite3
+from contextlib import asynccontextmanager, contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal, get_args
 
 import numpy as np
 import torch
@@ -12,8 +15,6 @@ from pydantic import BaseModel
 from shapes.manifest import ManifestRow, read_manifest
 from shapes.model import MODELS
 from shapes.pointcloud import GRID, N_POINTS, load_mesh, load_points, normalize, voxelize
-
-from typing import Literal
 
 
 # resolved from this file, not the working directory, so the server finds its files wherever uvicorn is started
@@ -31,6 +32,13 @@ PREPARE = {
 # objects per forward pass; pointnet's widest activation is batch × 1,024 points × 1,024 channels of float32,
 # about 268 MB at 64 vs. about 3 GB for the largest class-and-split (755 train chairs) in one pass
 BATCH = 64
+
+
+# label reviews are user-generated state: the file sits beside the code but is gitignored
+DB_PATH = ROOT / "backend" / "reviews.db"
+# bump when the table changes; startup refuses a file written for a different layout
+SCHEMA_VERSION = 1
+Verdict = Literal["ok", "wrong", "ambiguous"]
 
 
 def load_model(path: Path, classes: list[str]) -> torch.nn.Module:
@@ -73,11 +81,62 @@ def load_all_points(rows: list[ManifestRow]) -> dict[str, np.ndarray]:
     return points
 
 
+@contextmanager
+def db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        # the connection's own context manager commits on success and rolls back on an exception, but doesn't close
+        with conn:
+            yield conn
+    finally:
+        conn.close()
+
+
+def init_db() -> None:
+    with db() as conn:
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == SCHEMA_VERSION:
+            return
+        # create table if not exists would skip an old table silently, so a file from another layout fails here instead
+        if version != 0:
+            raise RuntimeError(f"{DB_PATH.name} has schema version {version}; this server expects {SCHEMA_VERSION}")
+        # built from the same Literal the api validates with, so the two lists of verdicts can't drift apart
+        verdicts = ", ".join(f"'{v}'" for v in get_args(Verdict))
+        conn.execute(f"""
+            CREATE TABLE reviews (
+                review_id      INTEGER PRIMARY KEY,
+                object_id      TEXT    NOT NULL,
+                verdict        TEXT    NOT NULL CHECK (verdict IN ({verdicts})),
+                should_be      TEXT,
+                mesh_problem   INTEGER NOT NULL CHECK (mesh_problem IN (0, 1)),
+                saw_prediction INTEGER NOT NULL CHECK (saw_prediction IN (0, 1)),
+                note           TEXT,
+                created_at     TEXT    NOT NULL,
+                CHECK ((verdict = 'wrong') = (should_be IS NOT NULL))
+            )
+        """)
+        # history per object, newest first, without scanning the table
+        conn.execute("CREATE INDEX reviews_by_object ON reviews (object_id, review_id)")
+        # pragmas don't take ? placeholders; the value is our own integer constant, never input
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def review_dict(r: sqlite3.Row) -> dict:
+    d = dict(r)
+    # sqlite has no boolean type: the columns hold 0/1, and the api speaks true/false
+    d["mesh_problem"] = bool(d["mesh_problem"])
+    d["saw_prediction"] = bool(d["saw_prediction"])
+    return d
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # a model registered in model.py without an input recipe here would otherwise fail only on the first click
     if PREPARE.keys() != MODELS.keys():
         raise RuntimeError(f"PREPARE covers {sorted(PREPARE)}; MODELS has {sorted(MODELS)}")
+    init_db()
+    print(f"reviews database: {DB_PATH}")
     root = os.environ.get("MODELNET_ROOT")
     # meshes are only for the viewer, but a missing root should fail at startup, not on the first click
     if root is None or not Path(root).expanduser().is_dir():
@@ -193,3 +252,61 @@ def list_predictions(request: Request, split: Literal["train", "val", "test"], c
         }
         for i, r in enumerate(rows)
     ]
+
+
+class ReviewIn(BaseModel):
+    verdict: Verdict
+    # the class the object should have: required for "wrong", not allowed otherwise
+    should_be: str | None = None
+    mesh_problem: bool = False
+    # no default: the frontend must say whether the predictions were on screen, so a forgotten field can't be recorded as "no"
+    saw_prediction: bool
+    note: str | None = None
+
+
+@app.post("/objects/{obj_id}/reviews", status_code=201)
+def add_review(obj_id: str, body: ReviewIn, request: Request) -> dict:
+    row = get_row(request, obj_id)
+    # the table enforces the same rule; checking here returns a readable 422 instead of a 500 from sqlite
+    if (body.verdict == "wrong") != (body.should_be is not None):
+        raise HTTPException(status_code=422, detail="should_be is required for verdict 'wrong' and not allowed otherwise")
+    if body.should_be is not None:
+        if body.should_be not in request.app.state.classes:
+            raise HTTPException(status_code=422, detail=f"unknown class {body.should_be!r}")
+        if body.should_be == row.class_name:
+            raise HTTPException(status_code=422, detail=f"{row.class_name!r} is the current label; use verdict 'ok'")
+    # a blank note is stored as null, so "no note" has one representation
+    note = (body.note or "").strip() or None
+    with db() as conn:
+        cur = conn.execute(
+            "INSERT INTO reviews (object_id, verdict, should_be, mesh_problem, saw_prediction, note, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            # placeholders: values travel separately from the sql, so no note can change the statement
+            (row.id, body.verdict, body.should_be, body.mesh_problem, body.saw_prediction, note,
+             datetime.now(UTC).isoformat(timespec="seconds")),
+        )
+        new = conn.execute("SELECT * FROM reviews WHERE review_id = ?", (cur.lastrowid,)).fetchone()
+    return review_dict(new)
+
+
+@app.get("/objects/{obj_id}/reviews")
+def object_reviews(obj_id: str, request: Request) -> list[dict]:
+    row = get_row(request, obj_id)
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM reviews WHERE object_id = ? ORDER BY review_id DESC", (row.id,)
+        ).fetchall()
+    # newest first: the first entry is the current verdict, the rest are how it got there
+    return [review_dict(r) for r in rows]
+
+
+@app.get("/reviews")
+def latest_reviews() -> list[dict]:
+    # one row per reviewed object, its latest; review_id, not created_at, because timestamps can tie within a second
+    with db() as conn:
+        rows = conn.execute("""
+            SELECT * FROM reviews AS r
+            WHERE review_id = (SELECT MAX(review_id) FROM reviews WHERE object_id = r.object_id)
+            ORDER BY object_id
+        """).fetchall()
+    return [review_dict(r) for r in rows]
