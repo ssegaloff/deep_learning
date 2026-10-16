@@ -37,3 +37,7 @@ __pycache__
 
 # documents pdfs
 documents/*.pdf
+
+# training runs started from the app: user-generated, and can be large
+runs/
+

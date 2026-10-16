@@ -2,7 +2,9 @@
 
 import argparse
 import json
+import math
 import random
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -12,7 +14,8 @@ from sklearn.metrics import balanced_accuracy_score, confusion_matrix, f1_score
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from shapes.model import MODELS
+from shapes.defaults import MODEL_DEFAULTS, TRAINING
+from shapes.model import ACTIVATIONS, MODELS
 from shapes.pointcloud import GRID, N_POINTS, load_features, load_points
 
 
@@ -86,62 +89,129 @@ def fit(
     optimizer: torch.optim.Optimizer,
     max_epochs: int = 200,
     patience: int = 15,
+    on_epoch: Callable[[dict], None] | None = None,
 ) -> tuple[list[dict], int]:
     history, best_loss, best_epoch, best_state = [], float("inf"), 0, None
     for epoch in range(1, max_epochs + 1):
+        start = time.perf_counter()
         train_loss, train_acc = train_one_epoch(model, train_loader, loss_fn, optimizer)
         val, _ = evaluate(model, val_loader, loss_fn)
-        history.append({"epoch": epoch, "train_loss": train_loss, "train_accuracy": train_acc,
-                        **{f"val_{k}": v for k, v in val.items()}})
+        record = {"epoch": epoch, "train_loss": train_loss, "train_accuracy": train_acc,
+                  **{f"val_{k}": v for k, v in val.items()}, "seconds": time.perf_counter() - start}
+        history.append(record)
         print(f"epoch {epoch:3d}  train {train_loss:.4f} / {train_acc:.3f}  val {val['loss']:.4f} / {val['accuracy']:.3f}")
+        # a callback, not a file path: fit stays unaware of where progress goes (the cli prints, a run also writes a file)
+        if on_epoch is not None:
+            on_epoch(record)
         # select on val loss: it moves smoothly, while accuracy and f1 jump in steps of one object
+        # a nan loss compares false with everything, so a diverged epoch can never become "best"
         if val["loss"] < best_loss:
             best_loss, best_epoch = val["loss"], epoch
             # state_dict() returns references to the live tensors, so without clone() this "snapshot" would keep training
             best_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
         elif epoch - best_epoch >= patience:
             break
+    # with a user-chosen learning rate the loss can diverge from epoch 1, leaving nothing to restore; fail with the reason
+    if best_state is None:
+        raise RuntimeError("validation loss was never finite (the learning rate may be too high); no weights to restore")
     # hand back the selected model, not whatever the last epoch happened to leave
     model.load_state_dict(best_state)
     return history, best_epoch
 
 
-# level 1: conventional, cited defaults (reasons in the decisions doc); any later change is judged on val and logged
-LR = 1e-3
-WEIGHT_DECAY = 1e-2
-MAX_EPOCHS = 200
-PATIENCE = 15
+# how each model reads a split; the numbers live in shapes.defaults, shared with the backend
+LOADERS = {"mlp": load_features, "pointnet": load_points}
+# in eval mode batch norm uses running averages, so eval batch size changes speed, not results
 EVAL_BATCH_SIZE = 256
-CONFIGS = {
-    "mlp": {"load": load_features, "batch_size": 64, "model_kwargs": {"in_features": GRID**3, "hidden": 256, "dropout": 0.5}},
-    # batch 32 and dropout 0.3 are the pointnet paper's values (appendix c)
-    "pointnet": {"load": load_points, "batch_size": 32, "model_kwargs": {"dropout": 0.3}},
-}
+
+
+# argparse type checks: a bad value fails at the command line, before any data loads
+def positive_int(s: str) -> int:
+    v = int(s)
+    if v < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {v}")
+    return v
+
+
+def positive_float(s: str) -> float:
+    v = float(s)
+    # isfinite rejects nan and inf, which "v > 0" alone would let through (inf) or reject only by accident (nan)
+    if not (math.isfinite(v) and v > 0):
+        raise argparse.ArgumentTypeError(f"must be a finite number above 0, got {s}")
+    return v
+
+
+def nonneg_float(s: str) -> float:
+    v = float(s)
+    if not (math.isfinite(v) and v >= 0):
+        raise argparse.ArgumentTypeError(f"must be a finite number at least 0, got {s}")
+    return v
+
+
+def probability(s: str) -> float:
+    v = float(s)
+    # dropout 1 would zero every activation
+    if not 0 <= v < 1:
+        raise argparse.ArgumentTypeError(f"must be in [0, 1), got {s}")
+    return v
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", choices=sorted(CONFIGS), required=True)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--model", choices=sorted(MODELS), required=True)
+    parser.add_argument("--seed", type=int, default=TRAINING["seed"])
+    parser.add_argument("--lr", type=positive_float, default=TRAINING["lr"])
+    parser.add_argument("--weight-decay", type=nonneg_float, default=TRAINING["weight_decay"])
+    parser.add_argument("--max-epochs", type=positive_int, default=TRAINING["max_epochs"])
+    parser.add_argument("--patience", type=positive_int, default=TRAINING["patience"])
+    # model-specific: left as None, they become that model's level-1 value
+    parser.add_argument("--batch-size", type=positive_int)
+    parser.add_argument("--dropout", type=probability)
+    parser.add_argument("--hidden", type=positive_int, nargs="+", help="mlp only: hidden layer sizes, e.g. --hidden 512 128")
+    parser.add_argument("--activation", choices=sorted(ACTIVATIONS), help="mlp only")
     parser.add_argument("--points-dir", type=Path, default=Path("data/points"))
     parser.add_argument("--meta", type=Path, default=Path("data/meta.json"))
-    parser.add_argument("--weights-dir", type=Path, default=Path("backend/model"))
-    parser.add_argument("--results-dir", type=Path, default=Path("results"))
+    parser.add_argument("--weights-dir", type=Path)
+    parser.add_argument("--results-dir", type=Path)
+    # a run directory: weights, results, and per-epoch progress all go here, so a run can't overwrite the level-1 files
+    parser.add_argument("--out-dir", type=Path)
     args = parser.parse_args()
-    cfg = CONFIGS[args.model]
+
+    # loud, not ignored: a --hidden passed to pointnet would otherwise look like it had been applied
+    if args.model != "mlp" and (args.hidden or args.activation):
+        parser.error("--hidden and --activation apply to the mlp only")
+    if args.out_dir and (args.weights_dir or args.results_dir):
+        parser.error("--out-dir replaces --weights-dir and --results-dir; give one or the other")
+    weights_dir = args.out_dir or args.weights_dir or Path("backend/model")
+    results_dir = args.out_dir or args.results_dir or Path("results")
+    progress_path = args.out_dir / "progress.jsonl" if args.out_dir else None
+    if progress_path and progress_path.exists():
+        parser.error(f"{progress_path} already exists; each run gets a fresh directory")
+
+    # created before training, so an unwritable folder fails in a second instead of after the run
+    weights_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    
+    defaults = MODEL_DEFAULTS[args.model]
+    # "is None", not "or": dropout 0.0 is a real choice, and "or" would replace it with the default
+    pick = lambda value, key: defaults[key] if value is None else value
+    batch_size = pick(args.batch_size, "batch_size")
 
     # the stored class list fixes what each output index means; never re-derived, so labels can't shift under a trained model
     classes = json.loads(args.meta.read_text())["classes"]
-    model_kwargs = {**cfg["model_kwargs"], "n_classes": len(classes)}
+    model_kwargs = {"dropout": pick(args.dropout, "dropout"), "n_classes": len(classes)}
+    if args.model == "mlp":
+        model_kwargs |= {"in_features": GRID**3, "hidden": pick(args.hidden, "hidden"),
+                         "activation": pick(args.activation, "activation")}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     set_seed(args.seed)
     # all three splits load up front, so a missing or malformed file fails now rather than after training
-    train_ds, val_ds, test_ds = (to_tensors(args.points_dir / f"{s}.npz", device, cfg["load"]) for s in ("train", "val", "test"))
+    load = LOADERS[args.model]
+    train_ds, val_ds, test_ds = (to_tensors(args.points_dir / f"{s}.npz", device, load) for s in ("train", "val", "test"))
     # a seeded generator makes the shuffle order part of what the seed reproduces
-    train_loader = DataLoader(train_ds, batch_size=cfg["batch_size"], shuffle=True,
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                               generator=torch.Generator().manual_seed(args.seed), num_workers=0)
-    # in eval mode batch norm uses running averages, so eval batch size changes speed, not results
     val_loader = DataLoader(val_ds, batch_size=EVAL_BATCH_SIZE, num_workers=0)
 
     # fresh model every run, so nothing carries over from a previous one
@@ -149,9 +219,21 @@ def main() -> None:
     n_params = sum(p.numel() for p in model.parameters())
     print(f"{args.model}: {n_params:,} parameters on {device}")
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
-    history, best_epoch = fit(model, train_loader, val_loader, loss_fn, optimizer, MAX_EPOCHS, PATIENCE)
+    log_epoch = None
+    if progress_path:
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        progress_path.write_text("")
+
+        def log_epoch(record: dict) -> None:
+            # one whole line per write, closed (so flushed) each time: the backend reads this file while
+            # training runs, and treats a last line without its newline as not yet written
+            with progress_path.open("a") as f:
+                f.write(json.dumps(record) + "\n")
+
+    history, best_epoch = fit(model, train_loader, val_loader, loss_fn, optimizer,
+                              args.max_epochs, args.patience, on_epoch=log_epoch)
 
     # selection is finished; this is the only place test is ever evaluated
     # train is re-evaluated in eval mode for a clean number (the per-epoch train figures had dropout on)
@@ -161,10 +243,9 @@ def main() -> None:
     # preds is test's, from the last pass; rows are true classes, columns predicted
     cm = confusion_matrix(test_ds.tensors[1].cpu().numpy(), preds, labels=list(range(len(classes))))
 
-    config = {"seed": args.seed, "batch_size": cfg["batch_size"], "lr": LR, "weight_decay": WEIGHT_DECAY,
-              "max_epochs": MAX_EPOCHS, "patience": PATIENCE, "best_epoch": best_epoch}
-    args.weights_dir.mkdir(parents=True, exist_ok=True)
-    weights_path = args.weights_dir / f"{args.model}.pt"
+    config = {"seed": args.seed, "batch_size": batch_size, "lr": args.lr, "weight_decay": args.weight_decay,
+                "max_epochs": args.max_epochs, "patience": args.patience, "best_epoch": best_epoch}
+    weights_path = weights_dir / f"{args.model}.pt"
     # everything the backend needs to rebuild the model and to refuse a checkpoint that doesn't match its preprocessing
     torch.save({
         "arch": args.model,
@@ -178,8 +259,7 @@ def main() -> None:
         "config": config,
     }, weights_path)
 
-    args.results_dir.mkdir(parents=True, exist_ok=True)
-    results_path = args.results_dir / f"{args.model}.json"
+    results_path = results_dir / f"{args.model}.json"
     results_path.write_text(json.dumps({
         "model": args.model, "n_parameters": n_params, "model_kwargs": model_kwargs, "config": config,
         **results, "classes": classes, "confusion_matrix": cm.tolist(), "history": history,
