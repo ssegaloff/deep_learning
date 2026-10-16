@@ -122,6 +122,14 @@ Two networks, trained with the same loop. Both return logits (no softmax inside 
 - **Sanity check:** an untrained VoxelMLP has validation loss 2.3030, close to ln 10 = 2.3026, the loss of a uniform guess over 10 classes.
 - **Saved weights:** `backend/model/mlp.pt` and `backend/model/pointnet.pt` (committed). Each checkpoint also stores the architecture name, constructor arguments, class list, point count, grid size, and training config, and the backend refuses to load one that doesn't match its own preprocessing.
 
+**Hyperparameters on the command line.** `train.py` takes every training setting as a flag. With no flags it reproduces the committed level-1 run exactly.
+- Both models: `--lr`, `--weight-decay`, `--max-epochs`, `--patience`, `--batch-size`, `--dropout`, `--seed`.
+- VoxelMLP only: `--hidden N [N ...]` (one size per hidden layer, e.g. `--hidden 512 128`) and `--activation` (relu, tanh, gelu, or sigmoid). Passing either with `--model pointnet` is an error rather than being silently ignored. PointNet's architecture is fixed.
+- The defaults live in one place, `src/shapes/defaults.py`, which both `train.py` and the backend read, so the command line and the app can't disagree about what "default" means.
+- Values that would crash or be meaningless (a learning rate of 0, dropout of 1, a seed outside numpy's 0 to 2³² − 1) are rejected before any data loads.
+- `--out-dir DIR` writes the checkpoint, the results JSON, and `progress.jsonl` (one line of metrics per epoch, as it happens) into one folder, instead of overwriting `backend/model/` and `results/`. This is what the app's training runs use.
+- If the validation loss is never a finite number (for example, a learning rate so high that training diverges), the run stops with an error instead of saving a broken model.
+
 ### 6. Web application: `backend/main.py`, `frontend/`
 
 ```
@@ -140,6 +148,11 @@ React (Vite) → /api/* → Vite dev proxy → FastAPI → PyTorch (both models,
 | `POST /objects/{id}/reviews` | Saves a label review and returns the stored row |
 | `GET /objects/{id}/reviews` | That object's review history, newest first |
 | `GET /reviews` | The latest review of every reviewed object |
+| `GET /runs/defaults` | Each model's default training settings (the level-1 config) |
+| `POST /runs` | Starts a training run with the given settings; 409 if one is already running |
+| `GET /runs` | Every training run, newest first |
+| `GET /runs/{id}` | One run's status and settings, its per-epoch metrics so far, and its final metrics when done |
+| `POST /runs/{id}/cancel` | Stops a running run |
 
 - Predictions use the same stored 1,024 points that training used, not a fresh sample from the mesh, so a borderline object can't flip between runs. Running all 908 test objects through `/predict` reproduces the saved test accuracies exactly (0.870 and 0.903).
 - Both prediction routes call one forward function, so the filter's labels and the Classify panel can't disagree.
@@ -152,12 +165,19 @@ React (Vite) → /api/* → Vite dev proxy → FastAPI → PyTorch (both models,
 - The rules are enforced twice: by the API (a readable 422, e.g. "wrong" without a class) and by the table's own CHECK constraints. Startup refuses a database file written for a different schema version.
 - The database file is gitignored (it's user-generated state), so this repo ships no reviews; the demo video shows them.
 
-**Frontend (React 19 + React Three Fiber).** Three panels:
+**Training runs.** A run started from the app executes `train.py` as a separate process with `--out-dir runs/<id>/`. Each run folder holds `run.json` (the request, the exact command, status, timestamps), `log.txt`, `progress.jsonl`, and, when done, the checkpoint and results.
+- **A separate process, not a thread in the server:** cancelling actually stops it (and frees the GPU), a crash or out-of-memory error can't take the server down, and the server itself stays CPU-only. Each run's saved command can be pasted into a terminal to rerun it.
+- **One run at a time.** Runs never write to `backend/model/` or `results/`, so the reported models and numbers can't be overwritten from the app. `runs/` is gitignored.
+- **Settings are checked before a run starts** (wrong types, unknown fields, and out-of-range values get a 422 naming the field), within caps chosen for this machine: up to 4 hidden layers of up to 5,000 units, up to 500 epochs, MLP batch size up to 4,096, PointNet batch size 2–512 (batch norm fails on a batch of one).
+- **Status:** `running`, `done`, `failed` (with the last 20 lines of the log), `cancelled`, or `interrupted` (the server stopped while the run was going). A run that finished while no one was watching is still recorded as `done`.
+
+**Frontend (React 19 + React Three Fiber).** A top bar switches between two views, **Explore** and **Train**. The view is part of the URL (`#/explore`, `#/train`), so reloading keeps it and the back button works. Switching views keeps Explore's selection, filter, Classify result, and camera angle. Explore has three panels:
 - **Object picker:** class, split (test by default, since the models never trained on those objects), and a **Show** filter: all objects, any model wrong, PointNet wrong, or Voxel MLP wrong.
 - **3D viewer:** the selected mesh, with rotate, zoom, and pan, under an info strip (id, class, split, file, vertex and face counts). The meshes arrive normalized to the unit sphere, so one fixed camera fits every object; ModelNet's Z-up is rotated to three.js's Y-up for display only.
 - **Right panel:** an About section (the data, the models, limitations) while nothing is selected. Once an object is selected:
   - **Classify:** a table with one row per class and one column per model: a bar and percentage per cell, the true class's row marked, and ✓/✗ with the predicted class for each model.
   - **Label review:** the review form and the object's review history, newest first.
+- **Train** (in progress): a form for each model, then live training curves and the finished run's metrics.
 
 ## Results
 
@@ -202,6 +222,11 @@ Train accuracy is from a separate eval-mode pass with the restored weights. Bala
 - [x] Object info strip (file, vertex and face counts) and an About panel
 - [x] Label review form with history
 - [x] SQLite database of label reviews (append-only)
+- [x] Training hyperparameters as command-line flags, with per-epoch progress written as the run goes
+- [x] Backend routes to start, list, follow, and cancel training runs (separate process, one at a time)
+- [x] Explore / Train navigation
+- [ ] Interactive Training form (in progress)
+- [ ] Training Monitor (in progress)
 
 **Annotation:** yes. Each object's label can be reviewed (ok / wrong with the correct class / ambiguous), with a mesh-problem flag and a note; every review is kept.
 **Backend/database:** yes. FastAPI serves objects, meshes, predictions, and reviews; label reviews are stored in SQLite (`backend/reviews.db`, gitignored).
@@ -253,6 +278,11 @@ uv run python training/plot.py
 - Each training run writes `backend/model/<model>.pt` and `results/<model>.json` (metrics, confusion matrix, per-epoch history). Training uses the GPU if one is available.
 - `plot.py` reads the JSON files and writes `results/figures/curves.png`, `confusion_mlp.png`, and `confusion_pointnet.png`; it doesn't retrain.
 - The committed weights and results come from seed 0. Retraining overwrites them.
+- To try other settings without touching the committed files, give the run its own folder:
+
+```bash
+  uv run python training/train.py --model mlp --hidden 512 128 --activation gelu --out-dir runs/my-test
+```
 
 ### The app (two terminals)
 
