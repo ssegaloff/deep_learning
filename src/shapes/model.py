@@ -4,18 +4,37 @@ import torch
 from torch import nn
 
 
+# names, not classes, so checkpoints store a plain string: torch.load's weights_only mode refuses pickled classes
+# sigmoid is the classic contrast: its gradient is at most 0.25 and near 0 when saturated, so deeper stacks learn slowly
+ACTIVATIONS = {"relu": nn.ReLU, "tanh": nn.Tanh, "gelu": nn.GELU, "sigmoid": nn.Sigmoid}
+
+
 class VoxelMLP(nn.Module):
-    def __init__(self, in_features: int, hidden: int, n_classes: int, dropout: float = 0.5):
+    def __init__(
+        self,
+        in_features: int,
+        hidden: int | list[int],
+        n_classes: int,
+        dropout: float = 0.5,
+        activation: str = "relu",
+    ):
         super().__init__()
-        self.net = nn.Sequential(
-            # the one hidden layer: the only structural difference from logistic regression
-            nn.Linear(in_features, hidden),
-            # without a nonlinearity, two linear layers collapse into one, and this would just be logistic regression again
-            nn.ReLU(),
-            # about 1M weights vs. 3,392 training objects, so it needs regularization; dropout is active only in train mode
-            nn.Dropout(dropout),
-            nn.Linear(hidden, n_classes),
-        )
+        # an int is the level-1 form (one hidden layer); its checkpoint stores hidden=256, so both forms must load
+        sizes = [hidden] if isinstance(hidden, int) else list(hidden)
+        # hw2 requires at least one hidden layer; with none this would be logistic regression
+        if not sizes or any(h < 1 for h in sizes):
+            raise ValueError(f"need at least one hidden layer of positive size, got {hidden!r}")
+        if activation not in ACTIVATIONS:
+            raise ValueError(f"unknown activation {activation!r}; choose from {sorted(ACTIVATIONS)}")
+        layers, width = [], in_features
+        for h in sizes:
+            # without a nonlinearity, stacked linear layers collapse into one, and this would be logistic regression again
+            # dropout after every hidden layer: about 1M weights vs. 3,392 training objects; active only in train mode
+            layers += [nn.Linear(width, h), ACTIVATIONS[activation](), nn.Dropout(dropout)]
+            width = h
+        layers.append(nn.Linear(width, n_classes))
+        # one hidden layer gives linear, activation, dropout, linear: indices 0 and 3, the same keys as the level-1 checkpoint
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # returns logits, not probabilities: CrossEntropyLoss applies log-softmax itself, so a softmax here would be applied twice
