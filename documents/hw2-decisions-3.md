@@ -1,0 +1,117 @@
+# HW2 decisions, part 3: Interactive Training + Training Monitor (optional challenges)
+
+Continues `claude/hw2-decisions.md` (models, training, results, frontend through section 5) and `claude/hw2-decisions-viewer.md` (HW1-parity features, sections 6–9). Same labels: **verified**, **general knowledge**, **guess**. Started Oct 16, 2026; updated Oct 16 ~12:30 (sections 10c and 11).
+
+## What the rubric asks (verified, Homework 2.pdf §5)
+- **Interactive Training (+10):** the user can change one or more of: learning rate, number of epochs, hidden units, hidden layers, activation function, or other hyperparameters.
+- **Training Monitor (+10):** a GUI showing "(real-time)" train and validation loss, accuracy and other metrics on train, val, and test, and prediction results.
+- HW2 does not ask for a better model; §7 says keep the model simple. "Trying to improve on level 1" is experimentation, not a requirement.
+- Whether "(real-time)" requires push updates is unclear; Sabine may ask the TA. Working answer: 1-second polling (an epoch takes longer than that).
+
+## Decisions (Sabine, Oct 15 18:09 – Oct 16 11:50)
+- **Order:** HW1 parity first (done), then Interactive Training, then the Training Monitor. Monitor-only for finished runs first; loading a finished run into Classify as a third column is a **later option**.
+- **Navigation: hash routes** (option b): `#/explore`, `#/train` (view names not final). Reload keeps the view; back button works; no dependency. Rejected: tabs in state only (reload and back lose the view); React Router (a dependency for two views).
+  - **Camera reset on switching views is acceptable** (Sabine): Explore may unmount. Expected to be safe because a tab click is an ordinary unmount from an event, not an unmount during a render like the section-3 bug (guess, to confirm in the browser).
+  - Polling state for a running job must live in `App` (or the Train view kept mounted), so switching views mid-run doesn't lose it.
+- **Both models are trainable.** Each form is prefilled with that model's level-1 config, labeled by source: PointNet's batch 32 / dropout 0.3 / lr 1e-3 are the paper's (Appendix C); the MLP's hidden 256 / dropout 0.5 / batch 64 are conventional, not cited.
+  - **VoxelMLP knobs:** lr, max epochs, patience, hidden layer sizes (units and number of layers), activation (relu / tanh / gelu / sigmoid), dropout, weight decay, batch size, seed.
+  - **PointNet knobs:** lr, max epochs, patience, batch size, dropout, weight decay, seed. Architecture fixed (T-Nets, augmentation, lr schedule are code-level experiments, deferred).
+- **Training runs in a subprocess running `train.py`, not a thread in the server** (Sabine, 18:15). Why: real cancel (`terminate()`; the OS frees GPU memory when the process exits; Python can't kill a thread, general knowledge); a crash or CUDA OOM can't take the server down; the server stays CPU-only (a training thread would create a CUDA context held until the server exits, general knowledge); each UI run is a literal command line that can be rerun in a terminal; `fit` stays in the script (open item on code layout stays deferred). Costs: CLI flags, a progress file, startup per run (seconds), and orphan handling if uvicorn restarts mid-run.
+- **Progress reaches the page by polling `GET /runs/{id}` about once a second** (Sabine). Alternatives: Server-Sent Events / WebSocket push (a streaming endpoint; behavior through the Vite proxy unchecked). Per-batch updates rejected (noisy; the rubric names per-epoch metrics).
+- **Outputs: `runs/<run_id>/`, gitignored** (in `.gitignore` since `8b5b02d`). `backend/model/` and `results/` are never written by the UI. **One run at a time** (a second start → 409). This replaces the old "run-name argument" open item.
+- **Test numbers:** the rubric requires them, so a finished run shows them, labeled "not for choosing"; runs are compared on val; the README's level-1 numbers remain the reported result (tuning by watching test would make test no longer an unbiased estimate). The backend passes the results JSON through unchanged; labeling and placement are section 14's job.
+
+## Measured timings (verified on Legion, Oct 15 ~18:22; seed 0, default settings)
+| | Wall time | Epochs | Per epoch (rough; wall time includes a few seconds of startup) |
+|---|---|---|---|
+| VoxelMLP | 6.8 s | 27 | under 0.25 s |
+| PointNet | 44.8 s | 33 | about 1.2 s |
+- Both reproduced their level-1 best epochs (12, 18) and test scores (0.870, 0.903) exactly: seeding still holds.
+- Consequence: both models are practical to train interactively. The MLP finishes faster than the polling interval (its curve appears in jumps); PointNet's ~1.2 s/epoch suits the video's "real-time" demo.
+- Measured epoch time per run is now recorded (`"seconds"` per epoch in `progress.jsonl`; 0.31 s for epoch 1 of a 2.2M-parameter MLP, verified Oct 16).
+
+## Section 10a: `VoxelMLP` generalized (commit `2f89903`, verified Oct 15 ~18:28)
+- `hidden: int | list[int]`; an int is normalized to `[int]`. Reason: the committed level-1 `mlp.pt` stores `hidden=256`, and re-saving it just to match new code would rewrite a committed result. Cost: two input forms.
+- `activation` is a string looked up in `ACTIVATIONS = {"relu", "tanh", "gelu", "sigmoid"}` (Sabine asked to add sigmoid: its gradient is at most 0.25, from σ' = σ(1 − σ), so deeper stacks learn slowly; AdamW's per-weight step partly offsets small gradients, general knowledge, so the slowdown may be milder than under SGD). A string, not a class, because `torch.load`'s default `weights_only=True` only unpickles tensors and plain containers (general knowledge), and the backend relies on that default.
+- Dropout after every hidden layer, one rate. Zero hidden layers → `ValueError` (that would be logistic regression, which HW2 §2.1 rules out). Unknown activation → `ValueError`.
+- One hidden layer still builds Linear → act → Dropout → Linear, so the state_dict keys stay `net.0.*`, `net.3.*`.
+- PyTorch's default init is tuned for ReLU-family activations, so tanh/sigmoid runs start somewhat off-scale (general knowledge); one possible reason they train differently.
+- Verified: level-1 `mlp.pt` loads strictly through the backend's own `load_model` (1,051,402 params); `[512, 128]` + gelu gives keys `net.0`, `net.3`, `net.6`; `[]`, `[0]` rejected; `256.0` raises a bare `TypeError` ('float' object is not iterable) — loud but unhelpful, so **the backend must validate integer sizes before building a command** (done in section 11).
+
+## Section 10b: `train.py` flags, run directory, progress file (commit `8b5b02d`, verified Oct 16 ~11:47)
+- **New module `src/shapes/defaults.py`** (`TRAINING`, `MODEL_DEFAULTS`): one source of truth for the CLI defaults and the backend's request defaults (section 11). Copying numbers into the backend/frontend would drift without error. A narrow slice of the deferred code-layout item (constants only).
+- **Flags:** `--lr` (finite > 0), `--weight-decay` (finite ≥ 0), `--max-epochs`, `--patience`, `--batch-size` (ints ≥ 1), `--dropout` ([0, 1)), `--hidden N [N ...]`, `--activation`, `--seed`, `--out-dir`; `--weights-dir` / `--results-dir` kept for the CLI. Validation is in argparse `type=` functions, so bad values fail before data loads.
+- `--hidden` / `--activation` with PointNet → usage error (silently ignoring would look applied). `--out-dir` with `--weights-dir`/`--results-dir` → error.
+- **Model-specific defaults use `is None`, not `or`:** `args.dropout or 0.5` would turn a requested 0.0 into 0.5.
+- **`--out-dir DIR`** puts `<model>.pt`, `<model>.json`, and `progress.jsonl` in DIR. An existing `progress.jsonl` → error (each run gets a fresh directory).
+- **Folders are created before training** (Sabine chose this, Oct 16): an unwritable path fails in a second instead of after the run. Cost: a run that fails early leaves an empty folder (harmless; the backend makes a new folder per run). The later `progress_path.parent.mkdir` is now redundant but harmless.
+- **`progress.jsonl`:** one JSON object per epoch (`epoch, train_loss, train_accuracy, val_loss, val_accuracy, val_macro_f1, val_balanced_accuracy, seconds`), written by a callback (`fit(on_epoch=...)`), opened and closed per write. The backend treats a last line without its newline as not yet written.
+- **NaN guard in `fit`:** with a user-chosen lr the loss can diverge from epoch 1; NaN compares false, so no epoch becomes "best". If `best_state is None` at the end → `RuntimeError("validation loss was never finite ...")` instead of a confusing `load_state_dict(None)` crash.
+- `config` in the checkpoint and results JSON now records the actual lr, weight decay, batch size, epochs, patience used.
+- **A Claude mistake caught by the checks:** the instructions said to rename `args.weights_dir` in "three places"; there were two `weights_dir` and two `results_dir` lines. One was missed, and `--out-dir` crashed after training with `NoneType has no attribute mkdir`. Check 1 had passed only because it passed `--weights-dir` explicitly. Fixed; a grep confirmed no stale uses.
+- **Verified Oct 16:** defaults reproduce level 1 (best epoch 12, test 0.870); `--out-dir` run writes all three files, 5 progress lines with `"seconds"`; default folders created from nothing (run in a scratch folder with `uv run --project`); `--out-dir /proc/nope` fails at the `mkdir` before data loads; four rejections give usage errors (pointnet + `--hidden`, `--lr 0`, `--dropout 1`, reused `--out-dir`).
+- Plumbing-run numbers are not experiments: a 5-epoch sigmoid [512, 128] run (best epoch 5 = last, still improving, test 0.726) and a 2-epoch default run (test 0.841) say nothing about sigmoid or about the model.
+- **Ruff:** Claude added it as an optional check without explaining it; Sabine hadn't heard of it. Explained (Python linter by Astral; rule prefixes E/W pycodestyle, F pyflakes, I isort, RUF ruff's own; `# noqa: CODE` skips a rule on one line). **Not used going forward** unless Sabine asks; she removed the unused `# noqa: E731` and sorted the imports by hand. Unexplained: ruff ran I and RUF rules though the repo has no ruff config (a user-level config on Legion is a guess; irrelevant now).
+
+## Section 10c: seed range in `train.py` (commit `7bff94f`, verified Oct 16 ~12:08)
+- `seed_value` argparse type: 0 ≤ seed < 2³². `np.random.seed` accepts only that range (general knowledge); before this, `--seed -1` crashed inside `set_seed`. Found while writing the backend's request models.
+- **Where each check lives (Sabine agreed):** `train.py` rejects what would crash or be meaningless (`--lr 0`, `--dropout 1`, an out-of-range seed). The backend's caps are app policy: a command-line user may reasonably try 8,000 units, so caps don't go in `train.py`. numpy's limit is now written in both files; it's a fact about numpy, not a setting, so the copies won't drift.
+- Verified: grep shows one `--seed` line, `type=seed_value`; `-1` and `4294967296` → usage errors; `4294967295` accepted.
+- Offered, not done: a `train.py` check for PointNet batch sizes that leave a last batch of one object (it would need the train split's size, so it would sit after data loads). The backend's range prevents it for UI runs.
+
+## Section 11: backend run routes (commits `ce2da75`, `02e6b49`, `429d8f6`, `64fd991`; verified Oct 16 ~12:27)
+
+### Decisions (Sabine, Oct 16 ~11:59–12:21)
+- **Run records on disk:** `runs/<id>/run.json` holds the request, the exact command, status, `created_at`, `ended_at`, `returncode`. Written atomically: a temporary file, then `os.replace` (atomic, so a reader or a crash sees the old file or the new one, never half; general knowledge).
+  - Tradeoff vs. memory only: survives restarts (the Monitor can list past runs), keeps the exact command next to the outputs, and makes orphan marking possible. Costs: a startup scan and two records to keep in step (the live `Popen` handle and the file).
+  - Middle option rejected: inferring status from which files exist can't tell failed, cancelled, and interrupted apart after a restart.
+- **Orphans:** mark at startup; don't try to find or kill a surviving process. A stored PID may have been reused by an unrelated process (general knowledge). Cost: after a hard crash, a surviving `train.py` could hold the GPU while the app shows nothing running (`nvidia-smi` and kill it by hand).
+- **Caps (Sabine):** hidden units ≤ 5,000; hidden layers ≤ 4; max epochs ≤ 500; patience ≤ 500; PointNet batch 2–512; MLP batch 1–4,096; seed 0 to 2³² − 1.
+  - Memory (arithmetic): a 4 × 5,000 MLP has about 96M parameters; weights, gradients, and AdamW's two running averages ≈ 1.5 GB, well within 12 GB. Each such run saves a checkpoint of about 384 MB in `runs/`. Overfitting at that size is something to watch in the Monitor, not a reason to forbid it.
+  - **PointNet batch floor 2:** batch norm in train mode errors on a batch of one object. The last batch holds 3,392 mod b objects, and only b = 1 and b = 3,391 (prime) leave 1 (arithmetic). The 512 ceiling also bounds activation memory (widest activation ≈ 2 GB at 512 vs. ≈ 128 MB at 32; the full backward pass at 512 is a guess, so 512 is a cautious ceiling, not a measured one).
+  - **Two changes from the first proposal, accepted:** no "patience ≤ max epochs" rule (a larger patience just turns early stopping off, a valid choice); MLP batch cap 4,096 instead of 3,392 (anything ≥ 3,392 is already full-batch gradient descent, and a cap independent of the dataset size can't go stale).
+- **A run that finished while nothing polled is `done`, not `interrupted`** (Sabine, ~12:21; see the bug below).
+
+### `backend/runs.py` (new; `main.py` imports from it, never the reverse)
+- **Request models:** `MlpRun`, `PointNetRun`, a union discriminated on `model` (`RunRequest`), `REQUEST_MODELS`.
+  - `strict=True`: `256.0`, `"256"`, `true` are not accepted as integers (verified in the sandbox; and on Legion over HTTP, `[256.0]` → 422 at `body.mlp.hidden.0`). A JSON integer is still accepted for a float field (`"lr": 1` → 1.0).
+  - `extra="forbid"`: `hidden` sent with `pointnet` → 422 ("Extra inputs are not permitted"), the same reasoning as the argparse error.
+  - `allow_inf_nan=False`; ranges mirror argparse (lr > 0, weight decay ≥ 0, dropout in [0, 1)).
+  - Defaults are read from `shapes.defaults`, so an empty request `{"model": "pointnet"}` is the full level-1 config. `default_factory` gives each request its own `hidden` list.
+  - `activation` is checked against `ACTIVATIONS` in a validator, so a new activation in `model.py` needs no second list.
+- **`build_command(req, out_dir)`:** an argument list (never a shell string, so no injection), **every flag spelled out** (the saved command reproduces the run even if `shapes.defaults` changes later), `sys.executable` (the server's own Python and venv), absolute `TRAIN_SCRIPT`.
+- **`RunManager`:**
+  - A `threading.Lock` around check-then-start: FastAPI runs plain `def` routes in a thread pool (general knowledge), so two `POST /runs` could otherwise both see "nothing running."
+  - **No background watcher:** `_refresh()` calls `poll()` at the start of `start`, `get`, `list`, `cancel`, and `shutdown`. `poll()` also reaps the exited child (no zombie; general knowledge). With 1-second polling, status is at most a second stale.
+  - Ids are server-made, `YYYYMMDDTHHMMSSZ-<model>`, and checked against `RUN_ID` (a regex) before any id becomes a path, so `../x` can't escape `runs/` (path traversal; general knowledge). Ids sort chronologically. `mkdir(exist_ok=False)` → 409 "a run started this second" on a same-second collision (cancel then restart).
+  - `run.json` is written before `Popen`, so even a run that fails to launch has a record (`OSError` → `failed`, 500).
+  - stdout + stderr go to `runs/<id>/log.txt`, not `PIPE`: an unread pipe fills (about 64 KiB on Linux; general knowledge) and the child blocks on its next `print`.
+  - `cwd` = repo root, because `train.py`'s `--points-dir` / `--meta` defaults are relative paths (verified, reading `train.py`).
+  - Statuses: `running`; `done` (exit 0 **and** the results file exists); `failed` (with `log_tail`, the last 20 lines of `log.txt`); `cancelled` (a person chose to stop it); `interrupted` (the server went away).
+  - `get` adds `progress` (complete lines of `progress.jsonl` only) and, when done, `results` (the run's `<model>.json`). Files are read outside the lock (safe: `progress.jsonl` only grows; `run.json` is swapped atomically).
+  - Cancel: `terminate()` (SIGTERM; Python's default handling exits at once, general knowledge), wait 10 s, then `kill()`. Cancelling a run that isn't active → 409.
+  - `shutdown()` (lifespan, after `yield`): `_refresh()`, then stops any active run and marks it `interrupted`.
+  - `mark_interrupted()` (startup): a record still `running` becomes `done` if its results file exists (`train.py` writes it last; return code unknown, `null`), else `interrupted`.
+  - `HTTPException` is raised directly in `runs.py`. Alternative: the manager raises its own errors and `main.py` maps them to HTTP codes (keeps the manager FastAPI-free; more code for a backend-only module).
+
+### `backend/main.py`
+- Startup check `REQUEST_MODELS.keys() == MODELS.keys()` (same pattern as `PREPARE`): a registered model without a request class fails at startup.
+- `app.state.runs = RunManager(ROOT / "runs")`, `mark_interrupted()` before `yield`; `shutdown()` after `yield`.
+- Routes: `GET /runs/defaults` (each model's full request with defaults, built as `cls(model=arch).model_dump()`, so the form's prefill is exactly what an empty request runs; **declared before `/runs/{run_id}`**, because routes match in declaration order and `"defaults"` would otherwise be read as an id); `POST /runs` (201; 409 if active; 422 on bad input); `GET /runs` (newest first); `GET /runs/{id}` (404 for unknown or malformed ids); `POST /runs/{id}/cancel`.
+
+### Verified (Legion, Oct 16 ~12:06–12:27)
+- Request models: both level-1 commands built; 8 bad requests rejected, each naming its field.
+- Manager called directly: second start → 409; 2-epoch MLP `done`, test 0.841 (= section 10b's 2-epoch CLI run); PointNet cancelled after 5 s → return code −15; `../backend` and `nope` → 404; folders hold `log.txt`, `progress.jsonl`, `run.json` (plus `mlp.json`, `mlp.pt` when done).
+- Over HTTP: defaults route; `[256.0]` → 422; 201 on start; 409 naming the active run.
+- **A full default PointNet run started with `POST /runs` reproduced level 1: best epoch 18, test 0.9031.** The subprocess path changes nothing about training.
+- Ctrl-C mid-run → after restart the run reads `interrupted`, return code −15; `nvidia-smi` shows no GPU processes.
+  - **Finding:** −15 (SIGTERM) means the child was still alive when the shutdown step stopped it, so Ctrl-C did not reach it. Claude had said the terminal's process-group signal would kill it; that didn't happen here. Why: unknown (guess: `uv run` or the VS Code terminal delivers SIGINT to uvicorn only). The shutdown step is what covers this.
+- **A Claude bug, caught by Sabine's question:** `shutdown()` didn't `_refresh()` first, so a run that finished while nothing polled was recorded `interrupted` when the server stopped (Claude had first described this as only a startup issue). Evidence: `20261016T162432Z-mlp interrupted 0` (exit 0, mislabeled; Sabine may delete the folder). Fixed in `64fd991`; verified: `20261016T162657Z-mlp done 0`.
+- **Not tested:** the cancel route over HTTP (it only calls the tested `cancel`); the startup branch that turns a leftover `running` record with results into `done` (needs uvicorn killed without a clean shutdown, e.g. `kill -9`).
+- Cosmetic: the pushed `runs.py` ends with an extra blank line.
+
+## Then
+- **12:** frontend hash navigation (Explore / Train).
+- **13:** Train view: per-model form, prefilled from `GET /runs/defaults`, sources labeled. Option: read the caps from the request models' JSON schema (`model_json_schema()`) rather than repeating them in the frontend.
+- **14:** Monitor: live curves (train/val loss and accuracy per epoch), then the finished run's train/val/test metrics, confusion matrix, per-class recall; test labeled "not for choosing".
+- **Later option:** load a finished run into Classify as a third column (runtime model loading needs an atomic swap of `state.models`; the Show filter's label cache and hard-coded "PointNet wrong" / "Voxel MLP wrong" would need work).
