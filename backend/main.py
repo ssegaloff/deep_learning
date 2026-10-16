@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from shapes.manifest import ManifestRow, read_manifest
 from shapes.model import MODELS
 from shapes.pointcloud import GRID, N_POINTS, load_mesh, load_points, normalize, voxelize
+from runs import REQUEST_MODELS, RunManager, RunRequest
 
 
 # resolved from this file, not the working directory, so the server finds its files wherever uvicorn is started
@@ -135,6 +136,9 @@ async def lifespan(app: FastAPI):
     # a model registered in model.py without an input recipe here would otherwise fail only on the first click
     if PREPARE.keys() != MODELS.keys():
         raise RuntimeError(f"PREPARE covers {sorted(PREPARE)}; MODELS has {sorted(MODELS)}")
+    # a model in model.py without a run request class would be listed but untrainable; fail at startup instead
+    if REQUEST_MODELS.keys() != MODELS.keys():
+        raise RuntimeError(f"REQUEST_MODELS covers {sorted(REQUEST_MODELS)}; MODELS has {sorted(MODELS)}")
     init_db()
     print(f"reviews database: {DB_PATH}")
     root = os.environ.get("MODELNET_ROOT")
@@ -151,7 +155,11 @@ async def lifespan(app: FastAPI):
     for arch, model in app.state.models.items():
         print(f"loaded {arch}: {sum(p.numel() for p in model.parameters()):,} parameters")
     print(f"loaded {len(app.state.points):,} objects")
+    app.state.runs = RunManager(ROOT / "runs")
+    app.state.runs.mark_interrupted()
     yield
+    # lifespan code after yield runs when the server shuts down, including on ctrl-c
+    app.state.runs.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -310,3 +318,31 @@ def latest_reviews() -> list[dict]:
             ORDER BY object_id
         """).fetchall()
     return [review_dict(r) for r in rows]
+
+
+# declared before /runs/{run_id}: routes match in order, so "defaults" would otherwise be read as a run id
+@app.get("/runs/defaults")
+def run_defaults() -> dict:
+    # the request classes hold the defaults, so the form's prefill is exactly what an empty request would run
+    return {arch: cls(model=arch).model_dump() for arch, cls in REQUEST_MODELS.items()}
+
+
+@app.post("/runs", status_code=201)
+def start_run(body: RunRequest, request: Request) -> dict:
+    return request.app.state.runs.start(body)
+
+
+@app.get("/runs")
+def list_runs(request: Request) -> list[dict]:
+    return request.app.state.runs.list()
+
+
+@app.get("/runs/{run_id}")
+def get_run(run_id: str, request: Request) -> dict:
+    return request.app.state.runs.get(run_id)
+
+
+@app.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: str, request: Request) -> dict:
+    return request.app.state.runs.cancel(run_id)
+
