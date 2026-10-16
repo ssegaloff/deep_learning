@@ -12,6 +12,7 @@ import torch
 from fastapi import FastAPI, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from shapes.defaults import SOURCES
 from shapes.manifest import ManifestRow, read_manifest
 from shapes.model import MODELS
 from shapes.pointcloud import GRID, N_POINTS, load_mesh, load_points, normalize, voxelize
@@ -139,6 +140,13 @@ async def lifespan(app: FastAPI):
     # a model in model.py without a run request class would be listed but untrainable; fail at startup instead
     if REQUEST_MODELS.keys() != MODELS.keys():
         raise RuntimeError(f"REQUEST_MODELS covers {sorted(REQUEST_MODELS)}; MODELS has {sorted(MODELS)}")
+    # every form field gets exactly one source label, so a new field can't appear unlabeled and a removed one can't
+    # leave a stale label; this checks that labels exist, not that their wording is true
+    for arch, cls in REQUEST_MODELS.items():
+        fields = cls.model_fields.keys() - {"model"}
+        labeled = SOURCES.get(arch, {}).keys()
+        if labeled != fields:
+            raise RuntimeError(f"SOURCES[{arch!r}]: missing {sorted(fields - labeled)}, extra {sorted(labeled - fields)}")
     init_db()
     print(f"reviews database: {DB_PATH}")
     root = os.environ.get("MODELNET_ROOT")
@@ -323,8 +331,10 @@ def latest_reviews() -> list[dict]:
 # declared before /runs/{run_id}: routes match in order, so "defaults" would otherwise be read as a run id
 @app.get("/runs/defaults")
 def run_defaults() -> dict:
-    # the request classes hold the defaults, so the form's prefill is exactly what an empty request would run
-    return {arch: cls(model=arch).model_dump() for arch, cls in REQUEST_MODELS.items()}
+    # the request classes hold the defaults, so the form's prefill is exactly what an empty request would run;
+    # sources sit beside the values, not inside them, so the form can send "values" back unchanged
+    return {arch: {"values": cls(model=arch).model_dump(), "sources": SOURCES[arch]}
+            for arch, cls in REQUEST_MODELS.items()}
 
 
 @app.post("/runs", status_code=201)
@@ -345,4 +355,3 @@ def get_run(run_id: str, request: Request) -> dict:
 @app.post("/runs/{run_id}/cancel")
 def cancel_run(run_id: str, request: Request) -> dict:
     return request.app.state.runs.cancel(run_id)
-

@@ -45,6 +45,8 @@ class _RunBase(BaseModel):
     # no "patience <= max_epochs" rule: a larger patience just means early stopping never triggers, a valid choice
     patience: int = Field(TRAINING["patience"], ge=1, le=MAX_EPOCHS)
     seed: int = Field(TRAINING["seed"], ge=0, le=MAX_SEED)
+    # null means a constant learning rate (level 1); otherwise halve it every lr_step epochs
+    lr_step: int | None = Field(TRAINING["lr_step"], ge=1, le=MAX_EPOCHS)
 
 
 class MlpRun(_RunBase):
@@ -93,6 +95,10 @@ def build_command(req: MlpRun | PointNetRun, out_dir: Path) -> list[str]:
         "--batch-size", str(req.batch_size),
         "--dropout", str(req.dropout),
     ]
+    # the one flag that can't always be spelled out: "off" is the flag's absence, so the saved command relies on
+    # train.py's default for it; the record's "request" field still says lr_step: null
+    if req.lr_step is not None:
+        cmd += ["--lr-step", str(req.lr_step)]
     if isinstance(req, MlpRun):
         cmd += ["--hidden", *(str(h) for h in req.hidden), "--activation", req.activation]
     return cmd
@@ -142,7 +148,7 @@ class RunManager:
                 # train.py writes its results file last, so if it exists the run finished; its exit code is lost
                 finished = (record_path.parent / f"{record['model']}.json").exists()
                 write_json(record_path, record | {"status": "done" if finished else "interrupted", "ended_at": now()})
-                
+
     def start(self, req: MlpRun | PointNetRun) -> dict:
         with self.lock:
             self._refresh()
@@ -250,4 +256,4 @@ class RunManager:
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
-
+            

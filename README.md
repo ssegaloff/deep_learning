@@ -123,7 +123,7 @@ Two networks, trained with the same loop. Both return logits (no softmax inside 
 - **Saved weights:** `backend/model/mlp.pt` and `backend/model/pointnet.pt` (committed). Each checkpoint also stores the architecture name, constructor arguments, class list, point count, grid size, and training config, and the backend refuses to load one that doesn't match its own preprocessing.
 
 **Hyperparameters on the command line.** `train.py` takes every training setting as a flag. With no flags it reproduces the committed level-1 run exactly.
-- Both models: `--lr`, `--weight-decay`, `--max-epochs`, `--patience`, `--batch-size`, `--dropout`, `--seed`.
+- Both models: `--lr`, `--weight-decay`, `--max-epochs`, `--patience`, `--batch-size`, `--dropout`, `--seed`, and `--lr-step N` (halve the learning rate every N epochs, the PointNet paper's factor; off by default, as at level 1).
 - VoxelMLP only: `--hidden N [N ...]` (one size per hidden layer, e.g. `--hidden 512 128`) and `--activation` (relu, tanh, gelu, or sigmoid). Passing either with `--model pointnet` is an error rather than being silently ignored. PointNet's architecture is fixed.
 - The defaults live in one place, `src/shapes/defaults.py`, which both `train.py` and the backend read, so the command line and the app can't disagree about what "default" means.
 - Values that would crash or be meaningless (a learning rate of 0, dropout of 1, a seed outside numpy's 0 to 2³² − 1) are rejected before any data loads.
@@ -148,7 +148,7 @@ React (Vite) → /api/* → Vite dev proxy → FastAPI → PyTorch (both models,
 | `POST /objects/{id}/reviews` | Saves a label review and returns the stored row |
 | `GET /objects/{id}/reviews` | That object's review history, newest first |
 | `GET /reviews` | The latest review of every reviewed object |
-| `GET /runs/defaults` | Each model's default training settings (the level-1 config) |
+| `GET /runs/defaults` | Each model's default training settings (the level-1 config) as `values`, with where each default comes from as `sources` |
 | `POST /runs` | Starts a training run with the given settings; 409 if one is already running |
 | `GET /runs` | Every training run, newest first |
 | `GET /runs/{id}` | One run's status and settings, its per-epoch metrics so far, and its final metrics when done |
