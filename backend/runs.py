@@ -139,8 +139,10 @@ class RunManager:
         for record_path in self.runs_dir.glob("*/run.json"):
             record = json.loads(record_path.read_text())
             if record["status"] == "running":
-                write_json(record_path, record | {"status": "interrupted", "ended_at": now()})
-
+                # train.py writes its results file last, so if it exists the run finished; its exit code is lost
+                finished = (record_path.parent / f"{record['model']}.json").exists()
+                write_json(record_path, record | {"status": "done" if finished else "interrupted", "ended_at": now()})
+                
     def start(self, req: MlpRun | PointNetRun) -> dict:
         with self.lock:
             self._refresh()
@@ -229,6 +231,8 @@ class RunManager:
     def shutdown(self) -> None:
         # called when the server stops, so a run never outlives the server that could report on it
         with self.lock:
+            # a run that finished since the last request is recorded as done, not interrupted
+            self._refresh()
             if self.active is not None:
                 run_id, proc = self.active
                 self._stop(proc)
@@ -247,4 +251,3 @@ class RunManager:
             proc.kill()
             proc.wait()
 
-            
