@@ -24,7 +24,7 @@ export default function MeshViewer({ id }) {
       <Canvas camera={{ position: [1.8, 1.2, 1.8], fov: 45 }}>
         <hemisphereLight args={['#ffffff', '#666677', 1.2]} />
         <directionalLight position={[3, 4, 2]} intensity={1.5} />
-        {id ? (
+        {id && (
           // inside the canvas and keyed by id: a failed mesh replaces only the shape, while the canvas, its webgl context, and the camera stay mounted
           <ErrorBoundary
             key={id}
@@ -35,12 +35,11 @@ export default function MeshViewer({ id }) {
               <Shape id={id} />
             </Suspense>
           </ErrorBoundary>
-        ) : (
-          // the hint renders inside the canvas too, so "nothing selected" doesn't unmount it
-          <Html center className="muted">Pick an object.</Html>
         )}
         <OrbitControls makeDefault />
       </Canvas>
+      {/* plain dom over the canvas, not drei's Html inside it: Html runs its own react root, which strict mode created twice and then failed to remove; a sibling never unmounts the canvas either */}
+      {!id && <p className="viewer-hint muted">Pick an object.</p>}
     </div>
   )
 }

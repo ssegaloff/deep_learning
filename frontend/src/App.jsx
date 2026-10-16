@@ -7,10 +7,14 @@ import PredictionPanel from './components/PredictionPanel'
 import ObjectPicker from './components/ObjectPicker'
 import MeshViewer from './components/MeshViewer'
 import ReviewPanel from './components/ReviewPanel'
+import NavBar from './components/NavBar'
+import TrainView from './components/TrainView'
+import { useView } from './route'
 import './App.css'
 
 
 export default function App() {
+  const view = useView()
   const [objects, setObjects] = useState(null)
   const [error, setError] = useState(null)
   const [selectedClass, setSelectedClass] = useState(null)
@@ -111,13 +115,13 @@ export default function App() {
   const shownInfo = info?.id === selectedId ? info : null
   const selected = selectedId ? objects?.find((o) => o.id === selectedId) : null
 
-  if (error) return <p className="status error">Could not load objects. {error}</p>
-  if (!objects) return <p className="status">Loading objects…</p>
-
-  return (
+  // explore's own loading and error messages, so train still works if /objects fails
+  let explore
+  if (error) explore = <p className="status error">Could not load objects. {error}</p>
+  else if (!objects) explore = <p className="status">Loading objects…</p>
+  else explore = (
     <div className="app">
       <aside className="sidebar">
-        <h1>ModelNet10 classifier</h1>
         <ObjectPicker
           classes={classes}
           selectedClass={activeClass}
@@ -135,7 +139,7 @@ export default function App() {
       </aside>
       <main className="main">
         <ObjectInfo object={selected} info={shownInfo} />
-        {/* always mounted: the canvas lives as long as the page, so changing class or split never tears down its webgl context */}
+        {/* always mounted: the canvas lives as long as the page, so changing class, split or view never tears down its webgl context */}
         <MeshViewer id={selectedId} />
       </main>
       <aside className="results">
@@ -155,6 +159,15 @@ export default function App() {
           </>
         ) : <About />}
       </aside>
+    </div>
+  )
+
+  return (
+    <div className="shell">
+      <NavBar view={view} />
+      {/* hidden, not unmounted: tearing down the r3f canvas throws (section 3, and again in section 12); the wrapper has no display rule, so the hidden attribute's display: none applies */}
+      <div hidden={view !== 'explore'}>{explore}</div>
+      {view === 'train' && <TrainView />}
     </div>
   )
 }

@@ -1,3 +1,41 @@
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100%;
+}
+
+/* grid items default to min-height: auto, so without this a long object list would stretch the page instead of scrolling */
+.shell > * {
+  min-height: 0;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.nav a {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+/* styled off aria-current, so what's highlighted and what a screen reader announces come from one attribute */
+.nav a[aria-current='page'] {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.train {
+  padding: 16px;
+  overflow: auto;
+}
+
 .app {
   display: grid;
   grid-template-columns: 260px 1fr 360px;
@@ -15,8 +53,9 @@
   min-height: 0;
 }
 
-.sidebar h1 {
+.nav h1 {
   margin: 0;
+  margin-right: 16px;
   font-size: 18px;
   font-weight: 600;
   color: var(--text-h);
@@ -119,6 +158,17 @@
   flex: 1;
   min-height: 0;
   width: 100%;
+  /* positioning context for the hint laid over the canvas */
+  position: relative;
+}
+
+.viewer-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  /* clicks and drags pass through to the canvas, so orbiting still works with the hint showing */
+  pointer-events: none;
 }
 
 .status {
