@@ -156,10 +156,18 @@ def probability(s: str) -> float:
     return v
 
 
+def seed_value(s: str) -> int:
+    v = int(s)
+    # np.random.seed accepts only 0 ..< 2**32, so a seed outside that fails here instead of inside set_seed
+    if not 0 <= v < 2**32:
+        raise argparse.ArgumentTypeError(f"must be in [0, 2**32), got {v}")
+    return v
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", choices=sorted(MODELS), required=True)
-    parser.add_argument("--seed", type=int, default=TRAINING["seed"])
+    parser.add_argument("--seed", type=seed_value, default=TRAINING["seed"])
     parser.add_argument("--lr", type=positive_float, default=TRAINING["lr"])
     parser.add_argument("--weight-decay", type=nonneg_float, default=TRAINING["weight_decay"])
     parser.add_argument("--max-epochs", type=positive_int, default=TRAINING["max_epochs"])
