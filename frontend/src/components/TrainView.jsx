@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ApiError, cancelRun, getRun, getRunDefaults, listRuns, startRun } from '../api'
 import { MODEL_LABELS } from '../models'
+import RunMonitor from './RunMonitor'
 
 // layout only: which settings exist, their defaults, sources and menu options all come from GET /runs/defaults
 const LABELS = {
@@ -100,6 +101,12 @@ export default function TrainView() {
   const [run, setRun] = useState(null)
   const [runError, setRunError] = useState(null)
   const [cancelling, setCancelling] = useState(false)
+  // { status: 'loading' | 'done' | 'error', list?, message? }: every run, newest first
+  const [runs, setRuns] = useState({ status: 'loading' })
+  // the run picked in the list; null means "follow the current run, or the newest"
+  const [selectedId, setSelectedId] = useState(null)
+  // { id, record } or { id, error }: a past run fetched for display, tagged with its id like explore's results
+  const [viewed, setViewed] = useState(null)
 
   useEffect(() => {
     let ignore = false
@@ -110,15 +117,39 @@ export default function TrainView() {
         setDrafts(Object.fromEntries(Object.entries(data).map(([arch, d]) => [arch, toDraft(d.values)])))
       })
       .catch((err) => { if (!ignore) setDefaults({ status: 'error', message: err.message }) })
-    // a run keeps going on the server through a reload, so look for one instead of showing an idle form
-    listRuns()
-      .then((runs) => { if (!ignore) setRun(findRunning(runs)) })
-      .catch((err) => { if (!ignore) setRunError(err.message) })
     return () => { ignore = true }
   }, [])
 
   const runId = run?.id
-  const running = run?.status === 'running'
+  const runStatus = run?.status
+  const running = runStatus === 'running'
+
+  // refetched when the followed run starts or ends, so the list's statuses stay current without polling it
+  useEffect(() => {
+    let ignore = false
+    listRuns()
+      .then((list) => {
+        if (ignore) return
+        setRuns({ status: 'done', list })
+        // a run keeps going on the server through a reload, so follow it instead of showing an idle form
+        setRun((r) => r ?? findRunning(list))
+      })
+      .catch((err) => { if (!ignore) setRuns({ status: 'error', message: err.message }) })
+    return () => { ignore = true }
+  }, [runId, runStatus])
+
+  // derived: what the monitor shows; the followed run is live from polling, any other run is fetched once
+  const shownId = selectedId ?? runId ?? (runs.status === 'done' ? runs.list[0]?.id : undefined) ?? null
+  const fetchId = shownId && shownId !== runId ? shownId : null
+  useEffect(() => {
+    if (!fetchId) return
+    let ignore = false
+    getRun(fetchId)
+      .then((record) => { if (!ignore) setViewed({ id: fetchId, record }) })
+      .catch((err) => { if (!ignore) setViewed({ id: fetchId, error: err.message }) })
+    return () => { ignore = true }
+  }, [fetchId])
+  const shown = shownId === runId ? { record: run } : viewed?.id === shownId ? viewed : null
   useEffect(() => {
     if (!running) return
     let stopped = false
@@ -161,8 +192,14 @@ export default function TrainView() {
     setErrors(NO_ERRORS)
   }
 
+  // also refreshes the list, so the run that caused the 409 appears in it
   function findActive() {
-    listRuns().then((runs) => setRun(findRunning(runs))).catch((err) => setRunError(err.message))
+    listRuns()
+      .then((list) => {
+        setRuns({ status: 'done', list })
+        setRun(findRunning(list))
+      })
+      .catch((err) => setRuns({ status: 'error', message: err.message }))
   }
 
   function submit(e) {
@@ -179,6 +216,8 @@ export default function TrainView() {
       .then((record) => {
         setRun(record)
         setRunError(null)
+        // the monitor switches to the new run
+        setSelectedId(null)
       })
       .catch((err) => {
         const api = err instanceof ApiError
@@ -193,6 +232,8 @@ export default function TrainView() {
   function cancel() {
     setCancelling(true)
     cancelRun(run.id)
+      // the cancel route returns run.json only; refetch so the curves keep their progress
+      .then(() => getRun(run.id))
       .then((record) => setRun(record))
       // a 409 here means it ended on its own first; the next poll shows how
       .catch((err) => setRunError(err.message))
@@ -306,29 +347,52 @@ export default function TrainView() {
       <p className="muted">
         Each run trains a fresh model in its own folder under <code>runs/</code>; the level-1 weights the Explore view uses are never changed.
       </p>
-      {run && <RunStatus run={run} error={runError} cancelling={cancelling} onCancel={cancel} />}
-      {!run && runError && <p className="error">Could not check for a running job. {runError}</p>}
-      <form className="train-form" onSubmit={submit}>
-        <fieldset className="field">
-          <legend>Model</legend>
-          {Object.keys(defaults.data).map((arch) => (
-            <label key={arch} className="choice">
-              <input type="radio" name="train-model" value={arch} checked={model === arch} onChange={() => changeModel(arch)} />
-              {MODEL_LABELS[arch] ?? arch}
-            </label>
-          ))}
-        </fieldset>
-        {errors.general.map((msg) => <p key={msg} className="error">{msg}</p>)}
-        {keys.map(renderField)}
-        <div className="actions">
-          {/* one run at a time (the backend answers 409 otherwise), so start waits for the current one */}
-          <button type="submit" className="save" disabled={starting || running}>
-            {starting ? 'Starting…' : 'Start training'}
-          </button>
-          <button type="button" onClick={reset}>Reset to defaults</button>
-          {running && <span className="muted small">A run is in progress; start another when it ends or is cancelled.</span>}
+      <div className="train-layout">
+        <div>
+          {run && <RunStatus run={run} error={runError} cancelling={cancelling} onCancel={cancel} />}
+          <form className="train-form" onSubmit={submit}>
+            <fieldset className="field">
+              <legend>Model</legend>
+              {Object.keys(defaults.data).map((arch) => (
+                <label key={arch} className="choice">
+                  <input type="radio" name="train-model" value={arch} checked={model === arch} onChange={() => changeModel(arch)} />
+                  {MODEL_LABELS[arch] ?? arch}
+                </label>
+              ))}
+            </fieldset>
+            {errors.general.map((msg) => <p key={msg} className="error">{msg}</p>)}
+            {keys.map(renderField)}
+            <div className="actions">
+              {/* one run at a time (the backend answers 409 otherwise), so start waits for the current one */}
+              <button type="submit" className="save" disabled={starting || running}>
+                {starting ? 'Starting…' : 'Start training'}
+              </button>
+              <button type="button" onClick={reset}>Reset to defaults</button>
+              {running && <span className="muted small">A run is in progress; start another when it ends or is cancelled.</span>}
+            </div>
+          </form>
         </div>
-      </form>
+        <div>
+          <h3>Runs</h3>
+          {runs.status === 'loading' && <p className="muted">Loading runs…</p>}
+          {runs.status === 'error' && <p className="error">Could not load runs. {runs.message}</p>}
+          {runs.status === 'done' && runs.list.length === 0 && <p className="muted">No runs yet. Start one to see its curves here.</p>}
+          {runs.status === 'done' && runs.list.length > 0 && (
+            <ul className="run-list">
+              {runs.list.map((r) => (
+                <li key={r.id}>
+                  <button type="button" aria-pressed={r.id === shownId} onClick={() => setSelectedId(r.id)}>
+                    {new Date(r.created_at).toLocaleString()} · {MODEL_LABELS[r.model] ?? r.model} · {r.status}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {shown?.error && <p className="error">Could not load that run. {shown.error}</p>}
+          {shown?.record && <RunMonitor record={shown.record} />}
+          {shownId && !shown && <p className="muted">Loading run…</p>}
+        </div>
+      </div>
     </section>
   )
 }

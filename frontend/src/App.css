@@ -455,3 +455,170 @@
   margin: 2px 0 0;
   white-space: pre-wrap;
 }
+
+/* train view: form on the left, runs and monitor on the right; one column when the window is narrow */
+.train-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 440px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .train-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.train h3 {
+  margin: 12px 0 6px;
+  font-size: 15px;
+}
+
+.train h4 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+}
+
+.run-list {
+  max-height: 168px;
+  margin: 0 0 12px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.run-list button {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.run-list button:hover {
+  background: var(--panel);
+}
+
+.run-list button[aria-pressed='true'] {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.chart {
+  margin: 12px 0;
+}
+
+.chart figcaption {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* recessive axes and grid: the data lines carry the color */
+.chart .axis text,
+.chart .marker text,
+.chart .direct-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.chart .grid {
+  stroke: var(--border);
+}
+
+.chart .marker line {
+  stroke: var(--muted);
+  stroke-dasharray: 3 3;
+}
+
+/* transparent but hoverable, so the native tooltip appears anywhere in an epoch's column */
+.chart .hit {
+  fill: transparent;
+}
+
+.chart .hit:hover {
+  fill: var(--accent-bg);
+}
+
+.legend {
+  display: flex;
+  gap: 14px;
+  margin: 4px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 16px;
+  height: 3px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.numbers {
+  border-collapse: collapse;
+  font-size: 13px;
+  /* digits of equal width, so columns of numbers line up */
+  font-variant-numeric: tabular-nums;
+}
+
+.numbers th,
+.numbers td {
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.numbers th[scope='row'],
+.numbers thead th:first-child {
+  text-align: left;
+}
+
+.numbers caption {
+  margin-bottom: 4px;
+  font-size: 13px;
+  text-align: left;
+}
+
+.numbers .test-row {
+  color: var(--muted);
+}
+
+.confusion .diag {
+  font-weight: 700;
+}
+
+.confusion .zero {
+  color: var(--muted);
+}
+
+.log {
+  max-height: 240px;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--panel);
+  font: 12px/1.4 var(--mono);
+  white-space: pre-wrap;
+}

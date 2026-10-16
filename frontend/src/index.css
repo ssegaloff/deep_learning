@@ -10,6 +10,9 @@
   --good: #1a7f4b;
   --bad: #b42318;
   --accent-bg: rgba(107, 59, 214, 0.1);
+  /* chart series: slots 1 and 2 of a categorical palette checked for color-vision deficiency and contrast */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
@@ -31,6 +34,8 @@
     --good: #4cc38a;
     --bad: #f0806f;
     --accent-bg: rgba(167, 123, 243, 0.15);
+    --series-1: #3987e5;
+    --series-2: #d95926;
   }
 }
 
