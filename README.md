@@ -6,7 +6,7 @@
 
 ## Description
 
-A web application that shows 3D CAD models of household objects and classifies them with two small neural networks. The user picks an object, sees the 3D mesh with its basic metadata, and clicks **Classify** to see both models' predicted class and their probability for every class, side by side, next to the true class. A filter lists only the objects one or both models get wrong, and a review form records a person's judgment of each object's label in a SQLite database. A **Train** view starts new training runs of either model with chosen settings and follows their progress, without touching the reported models.
+A web application that shows 3D CAD models of household objects and classifies them with two small neural networks. The user picks an object, sees the 3D mesh with its basic metadata, and clicks **Classify** to see both models' predicted class and their probability for every class, side by side, next to the true class. A filter lists only the objects one or both models get wrong, and a review form records a person's judgment of each object's label in a SQLite database. A **Train** view starts new training runs of either model with chosen settings, without touching the reported models, and shows each run's training curves live, then its final train, validation, and test metrics.
 
 This is the first step toward a longer project on 3D shape completion. Classification comes first because it builds the full pipeline: mesh loading, preprocessing, training, a backend that serves meshes and predictions, and a 3D viewer.
 
@@ -177,7 +177,7 @@ React (Vite) → /api/* → Vite dev proxy → FastAPI → PyTorch (both models,
 - **Right panel:** an About section (the data, the models, limitations) while nothing is selected. Once an object is selected:
   - **Classify:** a table with one row per class and one column per model: a bar and percentage per cell, the true class's row marked, and ✓/✗ with the predicted class for each model.
   - **Label review:** the review form and the object's review history, newest first.
-- **Train:** a form for each model, prefilled with its level-1 settings, each labeled with where the default comes from (the PointNet paper, a library default, or our own choice). Every training setting can be changed, including an optional schedule that halves the learning rate every N epochs (the PointNet paper halves it every 20). A mistake is shown under the field it concerns. Once a run starts, a status line follows it with a Cancel button, and reloading the page picks a running job back up. Live training curves and the finished run's metrics are in progress.
+- **Train:** a form for each model, prefilled with its level-1 settings, each labeled with where the default comes from (the PointNet paper, a library default, or our own choice). Every training setting can be changed, including an optional schedule that halves the learning rate every N epochs (the PointNet paper halves it every 20). A mistake is shown under the field it concerns. Once a run starts, a status line follows it with a Cancel button, and reloading the page picks a running job back up. Next to the form, a list of past runs and a **monitor** for the selected run: training and validation loss and accuracy per epoch, updated about once a second while it trains, with markers where the learning rate halved and at the epoch whose weights are kept; a table of the per-epoch numbers; and, when the run is done, its train, validation, and test metrics (test labeled "not for choosing", since runs are compared on validation) and its test confusion matrix with per-class recall. A failed run shows the end of its log.
 
 ## Results
 
@@ -225,8 +225,8 @@ Train accuracy is from a separate eval-mode pass with the restored weights. Bala
 - [x] Training hyperparameters as command-line flags, with per-epoch progress written as the run goes
 - [x] Backend routes to start, list, follow, and cancel training runs (separate process, one at a time)
 - [x] Explore / Train navigation
-- [x] Interactive Training form (in progress)
-- [ ] Training Monitor (in progress)
+- [x] Interactive Training form
+- [x] Training Monitor (live loss and accuracy curves, final train/val/test metrics, test confusion matrix and recall, past runs)
 
 **Annotation:** yes. Each object's label can be reviewed (ok / wrong with the correct class / ambiguous), with a mesh-problem flag and a note; every review is kept.
 **Backend/database:** yes. FastAPI serves objects, meshes, predictions, reviews, and training runs; label reviews are stored in SQLite (`backend/reviews.db`, gitignored), and each training run keeps a record in `runs/<id>/run.json`.
