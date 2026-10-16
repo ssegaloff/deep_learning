@@ -90,16 +90,22 @@ def fit(
     max_epochs: int = 200,
     patience: int = 15,
     on_epoch: Callable[[dict], None] | None = None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
 ) -> tuple[list[dict], int]:
     history, best_loss, best_epoch, best_state = [], float("inf"), 0, None
     for epoch in range(1, max_epochs + 1):
         start = time.perf_counter()
+        # read before training, so the record holds the rate this epoch's updates actually used
+        lr = optimizer.param_groups[0]["lr"]
         train_loss, train_acc = train_one_epoch(model, train_loader, loss_fn, optimizer)
         val, _ = evaluate(model, val_loader, loss_fn)
-        record = {"epoch": epoch, "train_loss": train_loss, "train_accuracy": train_acc,
+        # once per epoch, after that epoch's optimizer steps (pytorch warns if the scheduler steps before the optimizer)
+        if scheduler is not None:
+            scheduler.step()
+        record = {"epoch": epoch, "lr": lr, "train_loss": train_loss, "train_accuracy": train_acc,
                   **{f"val_{k}": v for k, v in val.items()}, "seconds": time.perf_counter() - start}
         history.append(record)
-        print(f"epoch {epoch:3d}  train {train_loss:.4f} / {train_acc:.3f}  val {val['loss']:.4f} / {val['accuracy']:.3f}")
+        print(f"epoch {epoch:3d}  lr {lr:.2e}  train {train_loss:.4f} / {train_acc:.3f}  val {val['loss']:.4f} / {val['accuracy']:.3f}")
         # a callback, not a file path: fit stays unaware of where progress goes (the cli prints, a run also writes a file)
         if on_epoch is not None:
             on_epoch(record)
@@ -123,6 +129,8 @@ def fit(
 LOADERS = {"mlp": load_features, "pointnet": load_points}
 # in eval mode batch norm uses running averages, so eval batch size changes speed, not results
 EVAL_BATCH_SIZE = 256
+# the pointnet paper's factor (appendix c: "divided by 2 every 20 epochs"); only the step is a flag
+LR_FACTOR = 0.5
 
 
 # argparse type checks: a bad value fails at the command line, before any data loads
@@ -172,6 +180,9 @@ def main() -> None:
     parser.add_argument("--weight-decay", type=nonneg_float, default=TRAINING["weight_decay"])
     parser.add_argument("--max-epochs", type=positive_int, default=TRAINING["max_epochs"])
     parser.add_argument("--patience", type=positive_int, default=TRAINING["patience"])
+    # absent means a constant rate (level 1); 0 is an error rather than a hidden "off"
+    parser.add_argument("--lr-step", type=positive_int, default=TRAINING["lr_step"],
+                        help=f"multiply the learning rate by {LR_FACTOR} every N epochs")
     # model-specific: left as None, they become that model's level-1 value
     parser.add_argument("--batch-size", type=positive_int)
     parser.add_argument("--dropout", type=probability)
@@ -199,7 +210,7 @@ def main() -> None:
     # created before training, so an unwritable folder fails in a second instead of after the run
     weights_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
-    
+
     defaults = MODEL_DEFAULTS[args.model]
     # "is None", not "or": dropout 0.0 is a real choice, and "or" would replace it with the default
     pick = lambda value, key: defaults[key] if value is None else value
@@ -228,6 +239,9 @@ def main() -> None:
     print(f"{args.model}: {n_params:,} parameters on {device}")
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # no scheduler at all when off, so a level-1 run takes exactly the code path it took before
+    scheduler = (torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step, gamma=LR_FACTOR)
+                 if args.lr_step is not None else None)
 
     log_epoch = None
     if progress_path:
@@ -241,7 +255,7 @@ def main() -> None:
                 f.write(json.dumps(record) + "\n")
 
     history, best_epoch = fit(model, train_loader, val_loader, loss_fn, optimizer,
-                              args.max_epochs, args.patience, on_epoch=log_epoch)
+                              args.max_epochs, args.patience, on_epoch=log_epoch, scheduler=scheduler)
 
     # selection is finished; this is the only place test is ever evaluated
     # train is re-evaluated in eval mode for a clean number (the per-epoch train figures had dropout on)
@@ -252,7 +266,8 @@ def main() -> None:
     cm = confusion_matrix(test_ds.tensors[1].cpu().numpy(), preds, labels=list(range(len(classes))))
 
     config = {"seed": args.seed, "batch_size": batch_size, "lr": args.lr, "weight_decay": args.weight_decay,
-                "max_epochs": args.max_epochs, "patience": args.patience, "best_epoch": best_epoch}
+                "max_epochs": args.max_epochs, "patience": args.patience, "lr_step": args.lr_step,
+                "best_epoch": best_epoch}
     weights_path = weights_dir / f"{args.model}.pt"
     # everything the backend needs to rebuild the model and to refuse a checkpoint that doesn't match its preprocessing
     torch.save({
@@ -280,3 +295,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
