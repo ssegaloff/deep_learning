@@ -6,7 +6,7 @@
 
 ## Description
 
-A web application that shows 3D CAD models of household objects and classifies them with two small neural networks. The user picks an object, sees the 3D mesh with its basic metadata, and clicks **Classify** to see both models' predicted class and their probability for every class, side by side, next to the true class. A filter lists only the objects one or both models get wrong, and a review form records a person's judgment of each object's label in a SQLite database.
+A web application that shows 3D CAD models of household objects and classifies them with two small neural networks. The user picks an object, sees the 3D mesh with its basic metadata, and clicks **Classify** to see both models' predicted class and their probability for every class, side by side, next to the true class. A filter lists only the objects one or both models get wrong, and a review form records a person's judgment of each object's label in a SQLite database. A **Train** view starts new training runs of either model with chosen settings and follows their progress, without touching the reported models.
 
 This is the first step toward a longer project on 3D shape completion. Classification comes first because it builds the full pipeline: mesh loading, preprocessing, training, a backend that serves meshes and predictions, and a 3D viewer.
 
@@ -171,13 +171,13 @@ React (Vite) → /api/* → Vite dev proxy → FastAPI → PyTorch (both models,
 - **Settings are checked before a run starts** (wrong types, unknown fields, and out-of-range values get a 422 naming the field), within caps chosen for this machine: up to 4 hidden layers of up to 5,000 units, up to 500 epochs, MLP batch size up to 4,096, PointNet batch size 2–512 (batch norm fails on a batch of one).
 - **Status:** `running`, `done`, `failed` (with the last 20 lines of the log), `cancelled`, or `interrupted` (the server stopped while the run was going). A run that finished while no one was watching is still recorded as `done`.
 
-**Frontend (React 19 + React Three Fiber).** A top bar switches between two views, **Explore** and **Train**. The view is part of the URL (`#/explore`, `#/train`), so reloading keeps it and the back button works. Switching views keeps Explore's selection, filter, Classify result, and camera angle. Explore has three panels:
+**Frontend (React 19 + React Three Fiber).** A top bar switches between two views, **Explore** and **Train**. The view is part of the URL (`#/explore`, `#/train`), so reloading keeps it and the back button works. Switching views keeps Explore's selection, filter, Classify result, and camera angle, and Train's form and the run it is following. Explore has three panels:
 - **Object picker:** class, split (test by default, since the models never trained on those objects), and a **Show** filter: all objects, any model wrong, PointNet wrong, or Voxel MLP wrong.
 - **3D viewer:** the selected mesh, with rotate, zoom, and pan, under an info strip (id, class, split, file, vertex and face counts). The meshes arrive normalized to the unit sphere, so one fixed camera fits every object; ModelNet's Z-up is rotated to three.js's Y-up for display only.
 - **Right panel:** an About section (the data, the models, limitations) while nothing is selected. Once an object is selected:
   - **Classify:** a table with one row per class and one column per model: a bar and percentage per cell, the true class's row marked, and ✓/✗ with the predicted class for each model.
   - **Label review:** the review form and the object's review history, newest first.
-- **Train** (in progress): a form for each model, then live training curves and the finished run's metrics.
+- **Train:** a form for each model, prefilled with its level-1 settings, each labeled with where the default comes from (the PointNet paper, a library default, or our own choice). Every training setting can be changed, including an optional schedule that halves the learning rate every N epochs (the PointNet paper halves it every 20). A mistake is shown under the field it concerns. Once a run starts, a status line follows it with a Cancel button, and reloading the page picks a running job back up. Live training curves and the finished run's metrics are in progress.
 
 ## Results
 
@@ -225,11 +225,11 @@ Train accuracy is from a separate eval-mode pass with the restored weights. Bala
 - [x] Training hyperparameters as command-line flags, with per-epoch progress written as the run goes
 - [x] Backend routes to start, list, follow, and cancel training runs (separate process, one at a time)
 - [x] Explore / Train navigation
-- [ ] Interactive Training form (in progress)
+- [x] Interactive Training form (in progress)
 - [ ] Training Monitor (in progress)
 
 **Annotation:** yes. Each object's label can be reviewed (ok / wrong with the correct class / ambiguous), with a mesh-problem flag and a note; every review is kept.
-**Backend/database:** yes. FastAPI serves objects, meshes, predictions, and reviews; label reviews are stored in SQLite (`backend/reviews.db`, gitignored).
+**Backend/database:** yes. FastAPI serves objects, meshes, predictions, reviews, and training runs; label reviews are stored in SQLite (`backend/reviews.db`, gitignored), and each training run keeps a record in `runs/<id>/run.json`.
 
 ## Libraries and frameworks
 
@@ -289,8 +289,10 @@ uv run python training/plot.py
 Backend:
 
 ```bash
-MODELNET_ROOT=/path/to/ModelNet10 uv run uvicorn main:app --app-dir backend --port 8000
+uv run uvicorn main:app --app-dir backend --port 8000
 ```
+
+This uses the `MODELNET_ROOT` exported in Setup.
 
 Frontend:
 
