@@ -1,6 +1,6 @@
 # HW2 decisions, part 3: Interactive Training + Training Monitor (optional challenges)
 
-Continues `claude/hw2-decisions.md` (models, training, results, frontend through section 5) and `claude/hw2-decisions-viewer.md` (HW1-parity features, sections 6–9). Same labels: **verified**, **general knowledge**, **guess**. Started Oct 16, 2026; updated Oct 16 ~14:05 (sections 10c, 11, 12).
+Continues `claude/hw2-decisions.md` (models, training, results, frontend through section 5) and `claude/hw2-decisions-viewer.md` (HW1-parity features, sections 6–9). Same labels: **verified**, **general knowledge**, **guess**. Started Oct 16, 2026; updated Oct 16 ~15:35 (sections 10c, 11, 12, 13).
 
 ## What the rubric asks (verified, Homework 2.pdf §5)
 - **Interactive Training (+10):** the user can change one or more of: learning rate, number of epochs, hidden units, hidden layers, activation function, or other hyperparameters.
@@ -12,10 +12,10 @@ Continues `claude/hw2-decisions.md` (models, training, results, frontend through
 - **Order:** HW1 parity first (done), then Interactive Training, then the Training Monitor. Monitor-only for finished runs first; loading a finished run into Classify as a third column is a **later option**.
 - **Navigation: hash routes** (option b): `#/explore`, `#/train` (view names not final). Reload keeps the view; back button works; no dependency. Rejected: tabs in state only (reload and back lose the view); React Router (a dependency for two views).
   - **Camera reset on switching views is acceptable** (Sabine): Explore may unmount. Expected to be safe because a tab click is an ordinary unmount from an event, not an unmount during a render like the section-3 bug (guess, to confirm in the browser). **Superseded in section 12:** the guess was wrong; Explore is now hidden, not unmounted, and the camera angle survives.
-  - Polling state for a running job must live in `App` (or the Train view kept mounted), so switching views mid-run doesn't lose it.
+  - Polling state for a running job must live in `App` (or the Train view kept mounted), so switching views mid-run doesn't lose it. **Section 13 chose the second: `TrainView` kept mounted, state inside it.**
 - **Both models are trainable.** Each form is prefilled with that model's level-1 config, labeled by source: PointNet's batch 32 / dropout 0.3 / lr 1e-3 are the paper's (Appendix C); the MLP's hidden 256 / dropout 0.5 / batch 64 are conventional, not cited.
   - **VoxelMLP knobs:** lr, max epochs, patience, hidden layer sizes (units and number of layers), activation (relu / tanh / gelu / sigmoid), dropout, weight decay, batch size, seed.
-  - **PointNet knobs:** lr, max epochs, patience, batch size, dropout, weight decay, seed. Architecture fixed (T-Nets, augmentation, lr schedule are code-level experiments, deferred).
+  - **PointNet knobs:** lr, max epochs, patience, batch size, dropout, weight decay, seed. Architecture fixed (T-Nets, augmentation are code-level experiments, deferred). **Section 13 added an lr schedule knob (`lr_step`) for both models.**
 - **Training runs in a subprocess running `train.py`, not a thread in the server** (Sabine, 18:15). Why: real cancel (`terminate()`; the OS frees GPU memory when the process exits; Python can't kill a thread, general knowledge); a crash or CUDA OOM can't take the server down; the server stays CPU-only (a training thread would create a CUDA context held until the server exits, general knowledge); each UI run is a literal command line that can be rerun in a terminal; `fit` stays in the script (open item on code layout stays deferred). Costs: CLI flags, a progress file, startup per run (seconds), and orphan handling if uvicorn restarts mid-run.
 - **Progress reaches the page by polling `GET /runs/{id}` about once a second** (Sabine). Alternatives: Server-Sent Events / WebSocket push (a streaming endpoint; behavior through the Vite proxy unchecked). Per-batch updates rejected (noisy; the rubric names per-epoch metrics).
 - **Outputs: `runs/<run_id>/`, gitignored** (in `.gitignore` since `8b5b02d`). `backend/model/` and `results/` are never written by the UI. **One run at a time** (a second start → 409). This replaces the old "run-name argument" open item.
@@ -148,8 +148,55 @@ Continues `claude/hw2-decisions.md` (models, training, results, frontend through
 - DevTools Issues tab: "A form field element should have an id or name attribute" (4). Chrome uses these for autofill; fields wrapped in a `<label>` are still labeled for screen readers. Hygiene, not a bug.
 - Claude's grep prediction for `MeshViewer.jsx` ("3 lines") missed two comments containing "Html"; the code was right. Predict grep counts against comments too.
 
+## Section 13: Interactive Training form (verified Oct 16 ~14:44–15:31; commits pending at time of writing: `train.py` + `defaults.py`, then backend `lr_step` + sources + startup check, then frontend + `CHOICES`)
+
+### Decisions (Sabine, Oct 16 ~14:09–14:37)
+- **`TrainView` always mounted inside `<div hidden={view !== 'train'}>`, with all Train state inside it** (option a). **Deviation from the earlier "polling state lives in `App`", flagged and accepted.** Gain: same mechanism as Explore; form drafts and polling survive a view switch; `App` stops growing. Cost: `/runs/defaults` and `/runs` are fetched at page load even if Train is never opened.
+- **No limits in the browser** (option a): the backend is the only authority; a 422 shows under the field it names. Rejected: `min`/`max` read from a JSON-schema route (no drift, but schema-walking code; the `hidden` list's limits sit inside `items`).
+- **Text inputs, not `type="number"`** (Sabine, ~14:31). Number inputs report `""` for partial input like `1e-`, apply a `step` rule (default 1) that blocks 0.001 under native validation, and change value on scroll (general knowledge). Cost: no spinner arrows.
+- **Hidden layers: one box per layer** with "+ layer" / "− layer" (option b); each layer gets its own 422 message (`loc` carries the index).
+- **Section 13 includes a status line and Cancel** (option a); curves and metrics stay in 14.
+- **Source labels served from `defaults.py`** (`SOURCES`), beside the values in `/runs/defaults`, plus a **startup check** (Sabine) that every request field except `model` has exactly one label. It catches a missing or orphaned label, not a wrong one.
+- **lr schedule knob** (Sabine, ~14:37; scope addition she chose). See below.
+
+### The PointNet paper's lr schedule (reread Oct 16)
+- **Verified (PointNet App. C):** Adam, initial lr 0.001, momentum 0.9 (= Adam's β₁, PyTorch's default; general knowledge), batch 32, lr divided by 2 every 20 epochs, batch-norm decay 0.5 → 0.99, dropout keep 0.7, 3–6 hours on ModelNet with a GTX 1080. **No weight decay mentioned**, so PointNet's weight-decay label says only "PyTorch AdamW default".
+- **Not the level-1 default** (the Oct 15 decision holds): our PointNet's best epoch was 18 and it stopped at 33, so the first halving (epoch 20) comes after the best epoch and early stopping likely ends the run before a second; the paper's hours imply far more epochs (count unknown). Copying the halving alone isn't the paper's recipe (no BN schedule, no augmentation, ModelNet10). Test has been seen, so any change is an experiment judged on val.
+- **The case for trying it:** PointNet's val loss is jagged (0.14 to 0.48 between neighboring epochs), which the Oct 15 decision named as the trigger; a lower late lr reduces step noise (general knowledge). Whether it helps here is unknown.
+
+### `train.py` and `defaults.py`
+- `--lr-step N` (`positive_int`; absent = constant lr, level 1; `0` → usage error, not a hidden "off"). Factor fixed at `LR_FACTOR = 0.5` (the paper's); only the step is a knob (Claude's choice, flagged). Applies to both models (`fit` is shared); the MLP's label says "off at level 1", no paper citation.
+- `StepLR` built only when the flag is given, so a level-1 run takes exactly the old code path. `scheduler.step()` once per epoch after training (PyTorch warns if the scheduler steps first; general knowledge).
+- Each epoch record gets `"lr"`, read before the epoch trains (the rate its updates used); the CLI epoch line prints it; `config` records `lr_step`.
+- `TRAINING["lr_step"] = None`; `SOURCES = {mlp: {...}, pointnet: {...}}` built from `_SHARED_SOURCES`.
+- Whitespace-only line after the `mkdir`s fixed.
+- **Verified (Legion):** grep 15 lines; no flag → best epoch 12, test 0.870, every epoch `lr 1.00e-03` (level 1 reproduced); `--lr-step 2 --max-epochs 5` → `1e-3, 1e-3, 5e-4, 5e-4, 2.5e-4`, epochs 1–2 identical to level 1 to the last digit, divergence from epoch 3; `--lr-step 0` → usage error. A paste lost a space (`halvesit`) in a label; caught by the grep, fixed before commit.
+
+### Backend
+- `_RunBase.lr_step: int | None = Field(None, ge=1, le=MAX_EPOCHS)`; `build_command` adds `--lr-step N` only when set.
+  - **Deviation, flagged and accepted:** "every flag spelled out" can't hold for "off" (it's the flag's absence), so a saved command without `--lr-step` relies on `train.py`'s default staying off. The record's `request` keeps `lr_step: null` as ground truth. Closing the gap would need an explicit `--lr-step none`.
+- `CHOICES` ClassVar on the request models (`MlpRun`: `{"activation": sorted(ACTIVATIONS)}`; others `{}`); pydantic doesn't treat a ClassVar as a field (verified in the sandbox: not in `model_fields`). Added so a new activation in `model.py` can't silently miss the menu (Claude's addition, flagged).
+- `/runs/defaults` → `{arch: {"values", "sources", "choices"}}`. Sources and choices sit beside the values so the form can send `values` back unchanged (`extra="forbid"` would 422 on extra keys).
+- Startup check in `lifespan`: `SOURCES[arch].keys() == cls.model_fields.keys() - {"model"}`, else `RuntimeError` naming missing and extra.
+- Whitespace-only line in `mark_interrupted` fixed.
+- **Verified (Legion):** defaults route shows values, sources, choices; `lr_step: 0` → 422 at `["body","mlp","lr_step"]`; a 3-epoch run with `lr_step: 2` → command has `--lr-step 2`, progress lr `[0.001, 0.001, 0.0005]`, done; commenting out the `seed` label → startup refuses with `SOURCES['mlp']: missing ['seed'], extra []`.
+
+### Frontend
+- `api.js`: `ApiError` (`status`, parsed `detail`; `.message` unchanged so Explore's error lines look the same); parsing tried, not assumed (the proxy's 502 is plain text); `postJson`; `getRunDefaults`, `startRun`, `listRuns`, `getRun`, `cancelRun`.
+- `TrainView.jsx`:
+  - Drafts are strings as typed, one per model. `parseNumber` treats empty and non-numeric as form errors (`Number("")` is 0). Non-integers in integer fields go to the backend, whose 422 names them.
+  - Every field sent explicitly, including `lr_step: null`.
+  - Client errors and 422s share keys (`lr`, `hidden.0`, `hidden`); an error without a field goes to the top. Errors clear on model switch.
+  - `LABELS` / `ORDER` are layout only; a field the backend adds later still shows under its own name.
+  - Schedule: checkbox, then "every N epochs", prefilled 20 (paper). "− layer" disabled at one layer (zero hidden layers would be logistic regression; a definition, not a cap). "Reset to defaults" button. PointNet selected first.
+  - Polling: a `setTimeout` chain started after each response (no stacked requests), only while `running`; cleanup cancels (covers StrictMode). On mount and after a 409, `GET /runs` picks up a running job.
+  - Every input has a `name` (autofill; DevTools Issues).
+  - Start disabled while a run is active. Status line: model, id, status, epochs finished; failed runs say only "failed" (log tail is section 14).
+  - Known wrinkle (guess, untested): a poll in flight as Cancel returns could show "running" for up to a second.
+- CSS: `.train` fills its grid row (`height: 100%`) so the form scrolls inside it.
+- **Verified (Legion, ~15:20–15:31):** lint clean; empty seed + `abc` lr → two field messages and no `POST /runs`; 5 layers → "at most 4 items"; `256.5` → "valid integer" under that box; PointNet + schedule → status advances once a second, Start disabled; Explore and back keeps status and the ticked box; reload picks the run up; Cancel → `cancelled` (**closes section 11's untested cancel-over-HTTP item**); a run started by curl → page's Start gets 409, message at top, the curl run's status line appears, Cancel stops it. Console: only `THREE.Clock` plus Chrome's own red log line for the 409 (Chrome logs every non-2xx fetch; our code catches it). Issues: the form-field notice dropped from 10 to 3; the train form's fields are off the list (the remaining 3 are probably Explore's menus; guess).
+
 ## Then
-- **12:** done (above).
-- **13:** Train view: per-model form, prefilled from `GET /runs/defaults`, sources labeled. Option: read the caps from the request models' JSON schema (`model_json_schema()`) rather than repeating them in the frontend.
-- **14:** Monitor: live curves (train/val loss and accuracy per epoch), then the finished run's train/val/test metrics, confusion matrix, per-class recall; test labeled "not for choosing".
+- **12, 13:** done (above).
+- **14:** Monitor: live curves (train/val loss and accuracy per epoch; `lr` per epoch is now in progress, so halvings can be marked), then the finished run's train/val/test metrics, confusion matrix, per-class recall; test labeled "not for choosing"; failed runs show `log_tail`.
 - **Later option:** load a finished run into Classify as a third column (runtime model loading needs an atomic swap of `state.models`; the Show filter's label cache and hard-coded "PointNet wrong" / "Voxel MLP wrong" would need work).
