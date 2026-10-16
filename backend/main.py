@@ -332,8 +332,8 @@ def latest_reviews() -> list[dict]:
 @app.get("/runs/defaults")
 def run_defaults() -> dict:
     # the request classes hold the defaults, so the form's prefill is exactly what an empty request would run;
-    # sources sit beside the values, not inside them, so the form can send "values" back unchanged
-    return {arch: {"values": cls(model=arch).model_dump(), "sources": SOURCES[arch]}
+    # sources and choices sit beside the values, not inside them, so the form can send "values" back unchanged
+    return {arch: {"values": cls(model=arch).model_dump(), "sources": SOURCES[arch], "choices": cls.CHOICES}
             for arch, cls in REQUEST_MODELS.items()}
 
 

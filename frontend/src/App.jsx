@@ -167,7 +167,8 @@ export default function App() {
       <NavBar view={view} />
       {/* hidden, not unmounted: tearing down the r3f canvas throws (section 3, and again in section 12); the wrapper has no display rule, so the hidden attribute's display: none applies */}
       <div hidden={view !== 'explore'}>{explore}</div>
-      {view === 'train' && <TrainView />}
+      {/* hidden too, not unmounted: the form drafts and the run's polling live in TrainView and must survive a switch to explore */}
+      <div hidden={view !== 'train'}><TrainView /></div>
     </div>
   )
 }

@@ -9,7 +9,7 @@ import sys
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, ClassVar, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -38,6 +38,8 @@ class _RunBase(BaseModel):
     # extra="forbid": a field this model doesn't use (hidden for pointnet) is an error, not silently ignored
     # allow_inf_nan=False: inf and nan are refused here rather than by argparse after the process starts
     model_config = ConfigDict(strict=True, extra="forbid", allow_inf_nan=False)
+    # the allowed values of fields the form shows as a menu; a ClassVar, so pydantic doesn't treat it as a request field
+    CHOICES: ClassVar[dict[str, list[str]]] = {}
 
     lr: float = Field(TRAINING["lr"], gt=0)
     weight_decay: float = Field(TRAINING["weight_decay"], ge=0)
@@ -57,6 +59,8 @@ class MlpRun(_RunBase):
     hidden: list[Annotated[int, Field(ge=1, le=MAX_HIDDEN_UNITS)]] = Field(
         default_factory=lambda: list(MODEL_DEFAULTS["mlp"]["hidden"]), min_length=1, max_length=MAX_HIDDEN_LAYERS)
     activation: str = MODEL_DEFAULTS["mlp"]["activation"]
+    # read from model.py's dict, like the validator below, so the form's menu can't miss an activation
+    CHOICES: ClassVar[dict[str, list[str]]] = {"activation": sorted(ACTIVATIONS)}
 
     # checked against model.py's dict, so a new activation there is accepted here without a second list to update
     @field_validator("activation")

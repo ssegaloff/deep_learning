@@ -148,7 +148,7 @@ React (Vite) → /api/* → Vite dev proxy → FastAPI → PyTorch (both models,
 | `POST /objects/{id}/reviews` | Saves a label review and returns the stored row |
 | `GET /objects/{id}/reviews` | That object's review history, newest first |
 | `GET /reviews` | The latest review of every reviewed object |
-| `GET /runs/defaults` | Each model's default training settings (the level-1 config) as `values`, with where each default comes from as `sources` |
+| `GET /runs/defaults` | Each model's default training settings (the level-1 config) as `values`, with `sources` (where each default comes from) and `choices` (menu options, e.g. activations) |
 | `POST /runs` | Starts a training run with the given settings; 409 if one is already running |
 | `GET /runs` | Every training run, newest first |
 | `GET /runs/{id}` | One run's status and settings, its per-epoch metrics so far, and its final metrics when done |

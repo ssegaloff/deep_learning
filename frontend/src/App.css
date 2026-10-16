@@ -32,8 +32,99 @@
 }
 
 .train {
+  /* fills its grid row so long forms scroll here, like explore's columns, instead of stretching the page */
+  height: 100%;
+  box-sizing: border-box;
   padding: 16px;
   overflow: auto;
+}
+
+.train h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.train-form {
+  max-width: 560px;
+}
+
+.train .field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 12px 0;
+  padding: 0;
+  border: 0;
+}
+
+.train .field legend {
+  margin-bottom: 4px;
+  padding: 0;
+}
+
+.train input[type='text'],
+.train select {
+  max-width: 12em;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.train .choice {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.train .inline {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.train .inline input {
+  width: 4em;
+}
+
+.layers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.layer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.layer input {
+  width: 5em;
+}
+
+.train input[aria-invalid='true'] {
+  border-color: var(--bad);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.run-status {
+  max-width: 560px;
+  margin: 12px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.run-status p {
+  margin: 4px 0;
 }
 
 .app {
