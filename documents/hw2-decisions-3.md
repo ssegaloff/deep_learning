@@ -1,6 +1,6 @@
 # HW2 decisions, part 3: Interactive Training + Training Monitor (optional challenges)
 
-Continues `claude/hw2-decisions.md` (models, training, results, frontend through section 5) and `claude/hw2-decisions-viewer.md` (HW1-parity features, sections 6–9). Same labels: **verified**, **general knowledge**, **guess**. Started Oct 16, 2026; updated Oct 16 ~12:30 (sections 10c and 11).
+Continues `claude/hw2-decisions.md` (models, training, results, frontend through section 5) and `claude/hw2-decisions-viewer.md` (HW1-parity features, sections 6–9). Same labels: **verified**, **general knowledge**, **guess**. Started Oct 16, 2026; updated Oct 16 ~14:05 (sections 10c, 11, 12).
 
 ## What the rubric asks (verified, Homework 2.pdf §5)
 - **Interactive Training (+10):** the user can change one or more of: learning rate, number of epochs, hidden units, hidden layers, activation function, or other hyperparameters.
@@ -11,7 +11,7 @@ Continues `claude/hw2-decisions.md` (models, training, results, frontend through
 ## Decisions (Sabine, Oct 15 18:09 – Oct 16 11:50)
 - **Order:** HW1 parity first (done), then Interactive Training, then the Training Monitor. Monitor-only for finished runs first; loading a finished run into Classify as a third column is a **later option**.
 - **Navigation: hash routes** (option b): `#/explore`, `#/train` (view names not final). Reload keeps the view; back button works; no dependency. Rejected: tabs in state only (reload and back lose the view); React Router (a dependency for two views).
-  - **Camera reset on switching views is acceptable** (Sabine): Explore may unmount. Expected to be safe because a tab click is an ordinary unmount from an event, not an unmount during a render like the section-3 bug (guess, to confirm in the browser).
+  - **Camera reset on switching views is acceptable** (Sabine): Explore may unmount. Expected to be safe because a tab click is an ordinary unmount from an event, not an unmount during a render like the section-3 bug (guess, to confirm in the browser). **Superseded in section 12:** the guess was wrong; Explore is now hidden, not unmounted, and the camera angle survives.
   - Polling state for a running job must live in `App` (or the Train view kept mounted), so switching views mid-run doesn't lose it.
 - **Both models are trainable.** Each form is prefilled with that model's level-1 config, labeled by source: PointNet's batch 32 / dropout 0.3 / lr 1e-3 are the paper's (Appendix C); the MLP's hidden 256 / dropout 0.5 / batch 64 are conventional, not cited.
   - **VoxelMLP knobs:** lr, max epochs, patience, hidden layer sizes (units and number of layers), activation (relu / tanh / gelu / sigmoid), dropout, weight decay, batch size, seed.
@@ -110,8 +110,46 @@ Continues `claude/hw2-decisions.md` (models, training, results, frontend through
 - **Not tested:** the cancel route over HTTP (it only calls the tested `cancel`); the startup branch that turns a leftover `running` record with results into `done` (needs uvicorn killed without a clean shutdown, e.g. `kill -9`).
 - Cosmetic: the pushed `runs.py` ends with an extra blank line.
 
+## Section 12: Explore / Train navigation (commit pending at time of writing; verified Oct 16 ~14:00)
+
+### Decisions (Sabine, Oct 16 ~13:11)
+- **Explore's state stays in `App`** (selection, filter, label cache, Classify result). Rejected: moving it into an `ExploreView` component (cleaner `App`, but the selection is lost on every switch). Cost: `App` keeps growing; extraction later is a mechanical move. Run polling state will live in `App` too.
+- **The view is read from the URL hash with `useSyncExternalStore`** (React's hook for state that lives outside React, general knowledge), in `src/route.js` (`VIEWS`, `useView`). The URL is the only copy, so nothing can drift. Rejected: `useState` + a `hashchange` listener in an effect (two copies of one fact).
+  - `currentView` returns a string, so equal snapshots compare equal under `Object.is` and there's no re-render loop (general knowledge).
+  - `Object.hasOwn(VIEWS, name)`, not `name in VIEWS`: `'toString' in VIEWS` is true through the prototype. Verified in the browser: `#/toString` and `#/nope` show Explore.
+  - An unknown hash shows Explore without rewriting the URL.
+- **Plain `<a href="#/train">` links, no click handlers:** the browser updates the hash, adds a history entry and fires `hashchange`, so back works for free.
+- **A top bar across both views** (`NavBar.jsx`) holds the page's one `<h1>` (moved out of the sidebar) and the links; the active link is styled off `aria-current="page"`. Cost: about 40 px of viewer height.
+- **`/objects` loading and error messages render inside the Explore branch only**, so Train works even if `/objects` fails (Claude flagged; Sabine agreed).
+- `TrainView.jsx` is a placeholder until section 13.
+
+### Explore is hidden, not unmounted (reverses "Explore may unmount")
+- **Claude's guess was wrong:** the decision above (part 3, "Decisions") expected unmounting Explore to be safe because a link click unmounts from an event, not during a render. The first version did exactly that, and leaving Explore logged "Attempted to synchronously unmount a root while React was already rendering" plus a `removeChild` NotFoundError, the section 3 symptoms. Claude should have caught this from section 3's own history: its second bug was also triggered from an event handler (clearing the selection swapped out `MeshViewer`). The lesson from section 3 is "never unmount the Canvas", not "never unmount it during a render."
+- **Fix:** Explore is always rendered inside `<div hidden={view !== 'explore'}>`; Train mounts only when open (it has no Canvas).
+  - The `hidden` attribute is the browser stylesheet's `display: none`, which any author `display` rule overrides. `hidden` on `.app` (`display: grid`) would do nothing, so the attribute sits on a plain wrapper with no `display` rule.
+  - Gain: the Canvas is created once per page load, and **the camera angle now survives a view switch** (the opposite of the reset Sabine had accepted). Costs: the WebGL context stays alive on Train (a few MB); R3F keeps drawing frames into a 0×0 canvas (the browser doesn't pause `requestAnimationFrame` for hidden elements, only background tabs; general knowledge). No warnings about a zero-size canvas appeared, and resizing the window on Train then returning gave correct proportions (verified).
+
+### The `removeChild` error on first selection: a section 3 bug, not section 12
+- **Symptom:** on a fresh load, "Attempted to synchronously unmount a root…" with nothing clicked; then `removeChild` NotFoundError (stack: `removeChildFromContainer` → `commitDeletionEffectsOnFiber` → `commitRoot`) when the first object is selected, pointing at `MeshViewer.jsx:40`, the "Pick an object." hint (a drei `Html` overlay inside the Canvas). The app kept working.
+- **Not caused by today's changes (verified):** with local changes stashed, the pushed code showed both messages. `MeshViewer.jsx`, `ErrorBoundary.jsx`, `main.jsx`, `package.json` and `package-lock.json` were unchanged since `10a8fe9` apart from one moved comment (git log). So **section 3's "console clean" result was wrong for this path**; whether the error scrolled by or wasn't watched at that moment is unknown.
+- **Mechanism.** Two independent readings agreed: Claude read drei's `src/web/Html.tsx` at main `bf6f4ad` (Sept 30, 2026), and Sabine's school Claude account read the drei 10.7.9 npm tarball and react-dom 19.3.0 without seeing Claude's hypothesis.
+  - **Verified (source):** each `Html` creates its own React root (`ReactDOM.createRoot(el)`) in a layout effect, on an element created once; its cleanup calls `target.removeChild(el)` then `currentRoot.unmount()`.
+  - **Verified (the other account's reading of R3F 9.8.2):** R3F forwards `StrictMode` into the Canvas, so StrictMode's dev-only mount → cleanup → mount of layout effects reaches `Html`. Roots get created twice on one element, and the cleanup's `unmount()` runs during R3F's commit, which is the call the "synchronously unmount" warning names.
+  - **Verified (the other account's reading of react-dom):** `removeChildFromContainer` is a bare `container.removeChild(child)`, which throws if the node was already removed; an empty root's commit clears its container.
+  - **Guess:** the exact order in which one root removes the other's node; why only the hint throws and not "Loading mesh…" (the other account's guess: the hint is the only `Html` mounted during Canvas startup, when `target` can change). The expected duplicate-`createRoot` warning didn't appear; Claude's guess is that `unmount()` clears the "has a root" mark before the second `createRoot` (React source not checked).
+  - Corroborating, not identical: a pmndrs/react-three-a11y issue reports a similar `Html`-style root crashing under StrictMode (from the other account; not checked by Claude).
+- **Fix:** the hint is plain DOM laid over the Canvas (`<p className="viewer-hint muted">` after `</Canvas>`; `.viewer { position: relative }`, `.viewer-hint` absolute, centered, `pointer-events: none` so orbit, zoom and pan pass through). No `Html` mounts at load. The Canvas still never unmounts, which was the point of putting the hint inside it in section 3.
+  - Cost: the hint is the only status message outside the Canvas. The loading and error messages stay as `Html`, because they must live inside `Suspense` and the error boundary, which are inside the Canvas; they use the same root pattern and haven't thrown so far.
+  - If one does: patch drei's `Html.js` to create its root once (`patch-package`; a patch to carry across upgrades). **Don't drop `StrictMode`:** it would hide this class of bug rather than fix it (Claude and the other account agree).
+- **Verified (Legion, Oct 16 ~14:00):** lint clean; no unmount warning on load; select → Classify → Train → back (link and back button) → change class → select again: console shows only `THREE.Clock`; selection, Classify result and camera angle survive the switch; hint centered; orbit, zoom and pan work with it showing.
+
+### Noted, not done
+- **Recenter button** (Sabine): after panning, the mesh can drift off-center with no way back but a reload. A button resetting the camera and the OrbitControls target would fix it.
+- DevTools Issues tab: "A form field element should have an id or name attribute" (4). Chrome uses these for autofill; fields wrapped in a `<label>` are still labeled for screen readers. Hygiene, not a bug.
+- Claude's grep prediction for `MeshViewer.jsx` ("3 lines") missed two comments containing "Html"; the code was right. Predict grep counts against comments too.
+
 ## Then
-- **12:** frontend hash navigation (Explore / Train).
+- **12:** done (above).
 - **13:** Train view: per-model form, prefilled from `GET /runs/defaults`, sources labeled. Option: read the caps from the request models' JSON schema (`model_json_schema()`) rather than repeating them in the frontend.
 - **14:** Monitor: live curves (train/val loss and accuracy per epoch), then the finished run's train/val/test metrics, confusion matrix, per-class recall; test labeled "not for choosing".
 - **Later option:** load a finished run into Classify as a third column (runtime model loading needs an atomic swap of `state.models`; the Show filter's label cache and hard-coded "PointNet wrong" / "Voxel MLP wrong" would need work).
