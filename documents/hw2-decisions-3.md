@@ -1,6 +1,6 @@
 # HW2 decisions, part 3: Interactive Training + Training Monitor (optional challenges)
 
-Continues `claude/hw2-decisions.md` (models, training, results, frontend through section 5) and `claude/hw2-decisions-viewer.md` (HW1-parity features, sections 6–9). Same labels: **verified**, **general knowledge**, **guess**. Started Oct 16, 2026; updated Oct 16 ~15:35 (sections 10c, 11, 12, 13).
+Continues `claude/hw2-decisions.md` (models, training, results, frontend through section 5) and `claude/hw2-decisions-viewer.md` (HW1-parity features, sections 6–9). Same labels: **verified**, **general knowledge**, **guess**. Started Oct 16, 2026; updated Oct 16 ~16:45 (sections 10c, 11–14).
 
 ## What the rubric asks (verified, Homework 2.pdf §5)
 - **Interactive Training (+10):** the user can change one or more of: learning rate, number of epochs, hidden units, hidden layers, activation function, or other hyperparameters.
@@ -196,7 +196,30 @@ Continues `claude/hw2-decisions.md` (models, training, results, frontend through
 - CSS: `.train` fills its grid row (`height: 100%`) so the form scrolls inside it.
 - **Verified (Legion, ~15:20–15:31):** lint clean; empty seed + `abc` lr → two field messages and no `POST /runs`; 5 layers → "at most 4 items"; `256.5` → "valid integer" under that box; PointNet + schedule → status advances once a second, Start disabled; Explore and back keeps status and the ticked box; reload picks the run up; Cancel → `cancelled` (**closes section 11's untested cancel-over-HTTP item**); a run started by curl → page's Start gets 409, message at top, the curl run's status line appears, Cancel stops it. Console: only `THREE.Clock` plus Chrome's own red log line for the 409 (Chrome logs every non-2xx fetch; our code catches it). Issues: the form-field notice dropped from 10 to 3; the train form's fields are off the list (the remaining 3 are probably Explore's menus; guess).
 
+## Section 14: Training Monitor (verified Oct 16 ~16:40; commit pending at time of writing)
+
+### Decisions (Sabine, Oct 16 ~15:37–16:13)
+- **Hand-written SVG, no charting library** (option a). Why: two charts of at most 500 points; later homework's visual growth is in 3D (segmentation colors, observed vs. inferred), which a chart library doesn't help; the confusion matrix and recall are tables anyway; the chart is one component, so a library could replace it later in one file. A library would pay off only with many chart types, zoom/brush, or thousands of points (judgment).
+- **Tooltips: the browser's native `<title>`** on an invisible full-height column per epoch (shows both series' values). A custom crosshair readout (~30 lines) only if wanted later.
+- **A runs list from `GET /runs`** (option b), one run shown at a time; overlaying two runs is a later option.
+- **"Prediction results" (rubric §5) = a finished run's test confusion matrix and per-class recall** (Sabine agrees with Claude's reading; for the TA question, open item 1).
+
+### NaN check (verified Oct 16 ~16:36)
+- A run at lr 10⁶: loss NaN from epoch 1, accuracy 0.027–0.038 (below chance), `fit` raised "validation loss was never finite", status `failed`.
+- `GET /runs/{id}` returned **200** (FastAPI 0.143 doesn't 500 on NaN in a returned dict). The page parsed it, and `JSON.parse` rejects a bare `NaN` token (general knowledge), so the values arrived as valid JSON, most likely `null` (inference; the bytes weren't seen). No backend fix needed; the frontend treats `null`, `NaN` and missing alike (skipped).
+
+### Code
+- `src/monitor.js` (pure helpers, testable without React): `niceScale` (1/2/5 × 10ⁿ steps, axis ends on ticks, float noise trimmed with `toPrecision`), `finiteExtent`, `linePath` (non-finite lifts the pen: the line breaks instead of dropping to 0), `lrDrops`, `bestEpoch` (same rule as `fit`: strict `<`, first on ties; `Number.isFinite` because `null < Infinity` is true in JS), `spreadLabels`.
+- `LineChart.jsx`: one y-axis; loss from 0, accuracy up to 1 (fixed bounds keep the axis steady); integer epoch ticks only; legend plus direct labels at line ends (identity never by color alone); recessive grid; end dot (a one-epoch run is visible); dashed markers in two label rows (top: "lr ½"; bottom: "best") so a halving at the best epoch doesn't collide.
+- `RunMonitor.jsx`: header (model, start time, status), settings line, loss and accuracy charts, a note that train values are running averages with dropout on, a collapsible per-epoch table (exact numbers and the table view), final metrics for train/val/test (test row greyed, "not for choosing"; all three an eval-mode pass with the restored weights), test confusion matrix (rows true, columns predicted; diagonal bold, zeros muted; recall column), failed run's `log_tail`.
+- `TrainView.jsx`: two columns (form | runs + monitor), one column under 960 px. The list is refetched when the followed run starts or ends (not polled), and adopts a running job on load. `shownId = selectedId ?? followed run ?? newest`; the followed run is live from polling, any other run is fetched once and tagged with its id. Cancel now refetches the run (the cancel route returns `run.json` only, which would have dropped the curves); the 409 lookup also refreshes the list. Starting a run returns the monitor to it.
+- Colors `--series-1/2` in `index.css`: slots 1–2 (blue, orange) of the dataviz skill's reference palette; validator passed light and dark (CVD ΔE 24.7 / 26.8, contrast ≥ 3:1). Claude-added: best marker, settings line, per-epoch table.
+- **Caught before Sabine saw them** (a stand-in JSX runtime rendering `RunMonitor` under Node): half-epoch ticks on a one-epoch run, "0.500" tick labels, overlapping marker labels.
+
+### Verified (Legion, ~16:40)
+- Lint clean. Runs list newest first, newest shown. **Section 11's full default PointNet run shows best epoch 18, "epoch 18 of 33", test 0.903, table recall 0.71** (matches level 1). A cancelled run shows curves to the cancel, no metrics. Native tooltip works. A live PointNet run with the schedule every 5 epochs: curves grow about once a second, "lr ½" at 6, 11, …, best moves; Explore and back keeps updating; at the end metrics and confusion matrix appear on their own and the list says `done`. The lr-10⁶ run shows its log. Console: only `THREE.Clock`.
+
 ## Then
-- **12, 13:** done (above).
-- **14:** Monitor: live curves (train/val loss and accuracy per epoch; `lr` per epoch is now in progress, so halvings can be marked), then the finished run's train/val/test metrics, confusion matrix, per-class recall; test labeled "not for choosing"; failed runs show `log_tail`.
+- **12–14:** done (above).
+- **Later options:** overlay two runs' curves; a custom hover readout; load a finished run into Classify (below).
 - **Later option:** load a finished run into Classify as a third column (runtime model loading needs an atomic swap of `state.models`; the Show filter's label cache and hard-coded "PointNet wrong" / "Voxel MLP wrong" would need work).
