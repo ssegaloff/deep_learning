@@ -26,10 +26,8 @@ data/raw
 
 __pycache__
 
-# /documents/hw2-video-outline.md
-# /documents/hw2-decisions.md
-# /documents/hw2-decisions-cont.md
-
+# personal notes and course pdfs; kept locally, not in the repo
+documents/
 
 # label reviews: user-generated state
 *.db
